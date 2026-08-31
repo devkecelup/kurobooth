@@ -1,0 +1,26 @@
+name: Supabase Keep-Alive
+
+on:
+  schedule:
+    # Runs every day at 06:00 UTC (13:00 WIB)
+    - cron: '0 6 * * *'
+  workflow_dispatch: # Allow manual trigger from GitHub UI
+
+jobs:
+  ping:
+    name: Ping Supabase
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /api/keepalive
+        run: |
+          echo "Pinging Supabase keep-alive endpoint..."
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" "${{ secrets.APP_URL }}/api/keepalive")
+          HTTP_STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS:" | cut -d: -f2)
+          BODY=$(echo "$RESPONSE" | grep -v "HTTP_STATUS:")
+          echo "Response: $BODY"
+          echo "HTTP Status: $HTTP_STATUS"
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "❌ Keep-alive ping failed with status $HTTP_STATUS"
+            exit 1
+          fi
+          echo "✅ Supabase is alive!"

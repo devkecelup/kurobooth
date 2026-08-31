@@ -1,0 +1,137 @@
+/* ===== Floating Mascot Assistant ===== */
+.floatingContainer {
+  position: fixed;
+  bottom: 28px;
+  right: 24px;
+  z-index: 990;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  pointer-events: none;
+  animation: slideUpFade 0.3s ease;
+}
+
+.withBottomNav {
+  bottom: 86px !important;
+}
+
+@keyframes slideUpFade {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.bubbleWrap {
+  pointer-events: auto;
+  position: relative;
+  background: #FFFFFF;
+  border: 1.5px solid #A2CFA9;
+  border-radius: 16px 16px 4px 16px;
+  padding: 10px 14px;
+  box-shadow: 0 8px 24px rgba(12, 30, 20, 0.14);
+  max-width: 220px;
+  animation: popIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes popIn {
+  0% { transform: scale(0.8); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.bubbleWrap::after {
+  content: '';
+  position: absolute;
+  right: -7px;
+  bottom: 12px;
+  width: 12px;
+  height: 12px;
+  background: #FFFFFF;
+  border-top: 1.5px solid #A2CFA9;
+  border-right: 1.5px solid #A2CFA9;
+  transform: rotate(45deg);
+}
+
+.bubbleHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.bubbleTitle {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #0D3B24;
+}
+
+.closeBtn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.closeBtn:hover {
+  color: #DC2626;
+}
+
+.bubbleText {
+  font-size: 0.75rem;
+  color: #2D5A3D;
+  line-height: 1.4;
+  margin: 0;
+  font-weight: 500;
+}
+
+.mascotBtn {
+  pointer-events: auto;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.2s ease;
+  filter: drop-shadow(0 6px 16px rgba(12, 30, 20, 0.16));
+}
+
+.mascotBtn:hover {
+  transform: scale(1.08) translateY(-2px);
+}
+
+.mascotBtn:active {
+  transform: scale(0.95);
+}
+
+/* Mobile Adjustments */
+@media (max-width: 900px) {
+  .floatingContainer {
+    bottom: 24px;
+    right: 16px;
+    gap: 8px;
+  }
+  .withBottomNav {
+    bottom: 84px !important;
+  }
+  .bubbleWrap {
+    max-width: 190px;
+    padding: 8px 12px;
+    border-radius: 14px 14px 4px 14px;
+  }
+  .bubbleText {
+    font-size: 0.6875rem;
+  }
+  .bubbleTitle {
+    font-size: 0.6875rem;
+  }
+}

@@ -1,0 +1,499 @@
+/* ===== Developer Profile: Kurokii (Clean, Compact, High-Quality) ===== */
+.page {
+  min-height: 100vh;
+  position: relative;
+  background-color: var(--bg-primary);
+  overflow-x: hidden;
+  max-width: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-sans);
+}
+
+/* Background Ambient Glows */
+.bgGlow1 {
+  position: fixed;
+  top: -140px;
+  left: -140px;
+  width: 440px;
+  height: 440px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(13, 59, 36, 0.08) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.bgGlow2 {
+  position: fixed;
+  bottom: -120px;
+  right: -120px;
+  width: 420px;
+  height: 420px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(20, 83, 51, 0.07) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.mainContent {
+  flex: 1;
+  padding: 32px 0 calc(90px + env(safe-area-inset-bottom, 0px));
+  position: relative;
+  z-index: 1;
+}
+
+.containerBox {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* 1. Main Hero Profile Card */
+.profileCard {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1.5px solid var(--border);
+  border-radius: 24px;
+  padding: 28px 24px;
+  box-shadow: 0 10px 30px rgba(12, 30, 20, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Header with Real Profile Photo & Status */
+.profileHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.profileUserGroup {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.avatarWrap {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  flex-shrink: 0;
+}
+
+.profileImg {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid #FFFFFF;
+  box-shadow: 0 4px 14px rgba(13, 59, 36, 0.18);
+  display: block;
+}
+
+.avatarStatusDot {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #10B981;
+  border: 2px solid #FFFFFF;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.3);
+}
+
+.profileMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.profileName {
+  font-size: 1.5rem;
+  font-weight: 900;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.profileRole {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: var(--radius-full);
+  background: #E4F2E8;
+  border: 1px solid #B8DCBF;
+  color: #0D3B24;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+/* Elegant Divider */
+.divider {
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border), transparent);
+  position: relative;
+  margin: 2px 0;
+}
+
+.dividerDot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: #FFFFFF;
+  padding: 0 8px;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+/* 2. Story / Vibe Coding Card */
+.storyBox {
+  background: #0C1E14;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid #1D402B;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+  color: #E2E8F0;
+}
+
+.storyHeader {
+  background: #07160E;
+  padding: 9px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #1A3525;
+}
+
+.storyDots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dotRed { width: 9px; height: 9px; border-radius: 50%; background: #EF4444; }
+.dotYellow { width: 9px; height: 9px; border-radius: 50%; background: #F59E0B; }
+.dotGreen { width: 9px; height: 9px; border-radius: 50%; background: #10B981; }
+
+.storyTitle {
+  font-size: 0.75rem;
+  font-family: monospace;
+  color: #85B59A;
+}
+
+.storyBody {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 0.9rem;
+  line-height: 1.65;
+  color: #D1E7D8;
+}
+
+.storyBody strong {
+  color: #FFFFFF;
+  font-weight: 700;
+}
+
+.storyBody em {
+  color: #FFDF73;
+  font-style: normal;
+  font-weight: 600;
+}
+
+/* 3. AI Superfriends Section */
+.aiSection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sectionTitle {
+  font-size: 0.78125rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.aiCardsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.aiCard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #FFFFFF;
+  border: 1.5px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition-base);
+}
+
+.aiCard:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.aiCardClaude:hover {
+  border-color: #D97706;
+  background: #FFFBEB;
+}
+
+.aiCardGemini:hover {
+  border-color: #8B5CF6;
+  background: #FAF5FF;
+}
+
+.aiImgLogo {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.aiInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.aiName {
+  font-size: 0.9375rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.aiRole {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* 4. Tech Stack (TypeScript & React JSX) */
+.techSection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.techCardsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.techCard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #FFFFFF;
+  border: 1.5px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition-base);
+}
+
+.techCard:hover {
+  border-color: var(--border-hover);
+  transform: translateY(-1px);
+}
+
+.techImgLogo {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.techInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.techName {
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.techRole {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* 5. Interactive Mascot Card */
+.mascotCard {
+  background: #EBF5EE;
+  border: 1.5px solid #C2E2CC;
+  border-radius: 18px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  cursor: pointer;
+  transition: all var(--transition-base);
+  user-select: none;
+}
+
+.mascotCard:hover {
+  background: #E0EFE5;
+  transform: translateY(-1px);
+}
+
+.mascotTextCol {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mascotHeading {
+  font-size: 0.8125rem;
+  font-weight: 800;
+  color: #0D3B24;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.mascotQuote {
+  font-size: 0.8125rem;
+  color: #244933;
+  line-height: 1.45;
+}
+
+.mascotHint {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--accent-1);
+  margin-top: 2px;
+}
+
+/* 6. Clean Action Buttons */
+.actionRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.btnActionPrimary {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-radius: 14px;
+  background: var(--accent-gradient);
+  color: #FFFFFF;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-decoration: none;
+  border: none;
+  box-shadow: 0 4px 14px rgba(13, 59, 36, 0.22);
+  transition: all var(--transition-fast);
+  cursor: pointer;
+}
+
+.btnActionPrimary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(13, 59, 36, 0.3);
+  color: #FFFFFF;
+}
+
+.btnActionSecondary {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-radius: 14px;
+  background: #FFFFFF;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-weight: 700;
+  border: 1.5px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition-fast);
+  cursor: pointer;
+}
+
+.btnActionSecondary:hover {
+  background: var(--bg-surface);
+  border-color: var(--border-hover);
+  color: var(--accent-1);
+  transform: translateY(-2px);
+}
+
+/* Mobile Responsive */
+@media (max-width: 600px) {
+  .profileCard {
+    padding: 20px 16px;
+    gap: 16px;
+    border-radius: 20px;
+  }
+
+  .profileHeader {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .profileName {
+    font-size: 1.3rem;
+  }
+
+  .aiCardsGrid,
+  .techCardsGrid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .actionRow {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .btnActionPrimary,
+  .btnActionSecondary {
+    width: 100%;
+    padding: 12px 16px;
+  }
+
+  .mascotCard {
+    padding: 12px 14px;
+  }
+}

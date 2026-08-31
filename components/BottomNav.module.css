@@ -1,0 +1,125 @@
+/* ===== Mobile Bottom Navigation Bar ===== */
+.bottomNav {
+  display: none;
+  position: fixed !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  width: 100% !important;
+  max-width: 100vw !important;
+  z-index: 999999 !important;
+  background: rgba(255, 255, 255, 0.98) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  border-top: 1px solid var(--border) !important;
+  box-shadow: 0 -4px 20px rgba(12, 30, 20, 0.08) !important;
+  padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px)) !important;
+  box-sizing: border-box !important;
+  margin: 0 !important;
+  overflow: visible !important;
+  font-family: var(--font-sans) !important;
+}
+
+.bottomNavInner {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-around !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 auto !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
+  position: relative !important;
+}
+
+.navItem {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 2px !important;
+  background: transparent !important;
+  border: none !important;
+  color: #64748B !important;
+  font-size: 0.6875rem !important;
+  font-weight: 600 !important;
+  padding: 4px 2px !important;
+  border-radius: var(--radius-md) !important;
+  position: relative !important;
+  transition: all var(--transition-fast) !important;
+  cursor: pointer !important;
+  -webkit-tap-highlight-color: transparent !important;
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  text-align: center !important;
+  font-family: var(--font-sans) !important;
+}
+
+.navItem:active {
+  transform: scale(0.92);
+}
+
+.navItemActive {
+  color: #0D3B24 !important;
+  font-weight: 800 !important;
+}
+
+.iconWrapper {
+  position: relative !important;
+  width: 32px !important;
+  height: 32px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: var(--radius-full) !important;
+  transition: all var(--transition-fast) !important;
+  color: inherit !important;
+}
+
+.navItemActive .iconWrapper {
+  background: #E4F2E8 !important;
+  color: #0D3B24 !important;
+}
+
+.activeDot {
+  width: 4px !important;
+  height: 4px !important;
+  border-radius: 50% !important;
+  background: #0D3B24 !important;
+  margin-top: 1px !important;
+}
+
+/* Center Highlight Button (Sumbang Template) */
+.highlightItem {
+  color: #0D3B24 !important;
+  margin-top: -14px !important;
+  z-index: 10 !important;
+}
+
+.highlightIconWrapper {
+  background: linear-gradient(135deg, #0D3B24 0%, #165B38 100%) !important;
+  color: #FFFFFF !important;
+  width: 44px !important;
+  height: 44px !important;
+  border-radius: 50% !important;
+  box-shadow: 0 4px 16px rgba(13, 59, 36, 0.35) !important;
+  border: 3px solid #FFFFFF !important;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease !important;
+}
+
+.highlightItem:hover .highlightIconWrapper {
+  transform: translateY(-2px) scale(1.06) !important;
+}
+
+.highlightLabel {
+  font-size: 0.6875rem !important;
+  font-weight: 800 !important;
+  color: #0D3B24 !important;
+  letter-spacing: -0.01em !important;
+}
+
+@media (max-width: 900px) {
+  .bottomNav {
+    display: block !important;
+  }
+}

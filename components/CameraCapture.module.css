@@ -1,0 +1,272 @@
+/* ===== CameraCapture Minimalist Layout ===== */
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  width: 100%;
+}
+
+.cameraWrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4/3;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  background: #081D12;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border);
+}
+
+.video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.hiddenCanvas {
+  display: none;
+}
+
+/* ===== Flash Effect ===== */
+.flash {
+  position: absolute;
+  inset: 0;
+  background: #FFFFFF;
+  z-index: 50;
+  pointer-events: none;
+  animation: flashAnim 0.25s ease-out forwards;
+}
+
+@keyframes flashAnim {
+  0% { opacity: 0.9; }
+  100% { opacity: 0; }
+}
+
+/* ===== Countdown Overlay ===== */
+.countdownOverlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 29, 18, 0.78);
+  backdrop-filter: blur(8px);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  cursor: pointer;
+}
+
+.countdownRing {
+  width: 110px;
+  height: 110px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #E4F2E8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(13, 59, 36, 0.6);
+  box-shadow: 0 0 32px rgba(13, 59, 36, 0.6);
+  animation: ringPulse 1s ease-in-out infinite;
+}
+
+@keyframes ringPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+.countdownNum {
+  font-size: 3.5rem;
+  font-weight: 800;
+  color: #FFFFFF;
+  line-height: 1;
+  font-family: var(--font-sans);
+  animation: numPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) both;
+}
+
+@keyframes numPop {
+  0% { transform: scale(0.4); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.countdownCancel {
+  font-size: 0.8125rem;
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(0, 0, 0, 0.35);
+  padding: 4px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+/* ===== Top Controls ===== */
+.topControls {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  gap: 8px;
+  z-index: 20;
+}
+
+.iconBtn {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  color: #0C1E14;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.iconBtn:hover {
+  background: #FFFFFF;
+  color: var(--accent-1);
+  transform: scale(1.05);
+}
+
+/* ===== Capture Area ===== */
+.captureArea {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.captureBtn {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  padding: 0;
+  transition: transform var(--transition-fast);
+}
+
+.captureBtn:hover:not(:disabled) {
+  transform: scale(1.06);
+}
+
+.captureBtn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.captureBtnRing {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid #0D3B24;
+  opacity: 0.9;
+  transition: all var(--transition-fast);
+}
+
+.captureBtn:hover .captureBtnRing {
+  border-color: #165B38;
+  box-shadow: 0 0 16px rgba(13, 59, 36, 0.4);
+}
+
+.captureBtnInner {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: var(--accent-gradient);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #FFFFFF;
+  box-shadow: 0 4px 14px rgba(13, 59, 36, 0.35);
+  transition: all var(--transition-fast);
+}
+
+.captureBtnCount {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #FFFFFF;
+}
+
+.captureBtnIcon {
+  color: #FFFFFF;
+}
+
+.capturing .captureBtnInner {
+  background: #072416;
+  transform: scale(0.9);
+}
+
+.captureHint {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* ===== Start Screen ===== */
+.startScreen {
+  width: 100%;
+  aspect-ratio: 4/3;
+  border-radius: var(--radius-xl);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 32px 24px;
+  text-align: center;
+}
+
+.cameraIconWrapper {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-full);
+  background: #E4F2E8;
+  border: 1px solid #B8DCBF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-1);
+}
+
+.cameraIconPulse {
+  position: absolute;
+  inset: -6px;
+  border-radius: var(--radius-full);
+  border: 1.5px solid rgba(13, 59, 36, 0.25);
+  animation: pulseGlow 2s ease-in-out infinite;
+}
+
+.startText {
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+  max-width: 320px;
+  line-height: 1.5;
+}
+
+.startBtn {
+  margin-top: 4px;
+}
+
+.errorMsg {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #FEF2F2;
+  border: 1px solid #FECACA;
+  color: #DC2626;
+  padding: 8px 16px;
+  border-radius: var(--radius-full);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
