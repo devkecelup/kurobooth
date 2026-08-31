@@ -24,6 +24,7 @@ import {
 import Mascot from '@/components/Mascot'
 import TemplatePreview from '@/components/TemplatePreview'
 import { TemplateConfig } from '@/lib/templates'
+import { getShareUrl } from '@/lib/utils'
 import styles from './page.module.css'
 
 const PRESET_4_VERTICAL = [
@@ -1031,47 +1032,65 @@ export default function AdminPage() {
               </div>
             ) : (
               <div className={styles.sessionsGrid}>
-                {displayedSessions.map(s => (
-                  <div key={s.id || s.share_code} className={styles.sessionCard}>
-                    <div className={styles.sessionThumbWrap} onClick={() => setPreviewLightboxImg(s.image_url)} title="Klik untuk lihat ukuran penuh">
-                      <img src={s.image_url} alt={`Strip ${s.share_code}`} className={styles.sessionThumb} />
-                    </div>
-                    <div className={styles.sessionInfo}>
-                      <div className={styles.sessionTopRow}>
-                        <span className={styles.sessionCode}>#{s.share_code}</span>
-                        <span className={styles.sessionDate}>
-                          {s.created_at ? new Date(s.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Baru saja'}
-                        </span>
+                {displayedSessions.map(s => {
+                  return (
+                    <div key={s.id || s.share_code} className={styles.sessionCard}>
+                      <div className={styles.sessionThumbWrap} onClick={() => setPreviewLightboxImg(s.image_url)} title="Klik untuk lihat ukuran penuh">
+                        <img
+                          src={s.image_url}
+                          alt={`Strip ${s.share_code}`}
+                          className={styles.sessionThumb}
+                          onError={(e) => {
+                            const target = e.currentTarget
+                            target.style.display = 'none'
+                            const parent = target.parentElement
+                            if (parent && !parent.querySelector('.img-error-badge')) {
+                              const badge = document.createElement('div')
+                              badge.className = 'img-error-badge'
+                              badge.style.cssText = 'padding: 16px; text-align: center; color: #E05252; font-size: 0.75rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; width: 100%; height: 100%;'
+                              badge.innerHTML = '<span style="font-size: 1.5rem;">⚠️</span><strong style="color: #FFFFFF;">Gambar Tidak Ditemukan</strong><span style="font-size: 0.6875rem; color: #A0AEC0;">Tersimpan sebelum Supabase Storage aktif</span>'
+                              parent.appendChild(badge)
+                            }
+                          }}
+                        />
                       </div>
+                      <div className={styles.sessionInfo}>
+                        <div className={styles.sessionTopRow}>
+                          <span className={styles.sessionCode}>#{s.share_code}</span>
+                          <span className={styles.sessionDate}>
+                            {s.created_at ? new Date(s.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Baru saja'}
+                          </span>
+                        </div>
 
-                      <div className={styles.sessionActions}>
-                        <button
-                          className="btn btn-secondary btn-sm w-full"
-                          onClick={() => window.open(s.image_url, '_blank')}
-                        >
-                          <ExternalLinkIcon size={14} />
-                          <span>Buka HD (Catbox)</span>
-                        </button>
-                        <div className={styles.sessionBottomRow}>
+                        <div className={styles.sessionActions}>
                           <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => window.open('/result/' + s.share_code, '_blank')}
+                            className="btn btn-secondary btn-sm w-full"
+                            onClick={() => window.open(s.image_url, '_blank')}
                           >
-                            <span>Halaman Hasil</span>
+                            <ExternalLinkIcon size={14} />
+                            <span>{s.image_url?.includes('supabase') ? 'Buka HD (Supabase)' : s.image_url?.includes('catbox') ? 'Buka HD (Catbox)' : 'Buka Gambar HD'}</span>
                           </button>
-                          <button
-                            className={styles.deleteBtn}
-                            onClick={() => handleDeleteSession(s.share_code)}
-                            title="Hapus Sesi"
-                          >
-                            <TrashIcon size={14} />
-                            <span>Hapus</span>
-                          </button>
+                          <div className={styles.sessionBottomRow}>
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => window.open(getShareUrl(s.share_code), '_blank')}
+                            >
+                              <span>Halaman Hasil</span>
+                            </button>
+                            <button
+                              className={styles.deleteBtn}
+                              onClick={() => handleDeleteSession(s.share_code)}
+                              title="Hapus Sesi"
+                            >
+                              <TrashIcon size={14} />
+                              <span>Hapus</span>
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </section>

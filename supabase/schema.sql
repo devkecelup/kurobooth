@@ -61,3 +61,34 @@ create policy "Allow public update templates" on public.templates for update usi
 
 drop policy if exists "Allow public delete templates" on public.templates;
 create policy "Allow public delete templates" on public.templates for delete using (true);
+
+-- =========================================================
+-- 5. Storage Bucket & Policies for photobooth-results
+-- =========================================================
+insert into storage.buckets (id, name, public)
+values ('photobooth-results', 'photobooth-results', true)
+on conflict (id) do update set public = true;
+
+-- Policy upload ke bucket photobooth-results
+drop policy if exists "Allow public uploads to photobooth-results" on storage.objects;
+create policy "Allow public uploads to photobooth-results"
+on storage.objects for insert
+with check ( bucket_id = 'photobooth-results' );
+
+-- Policy baca/view dari bucket photobooth-results
+drop policy if exists "Allow public read from photobooth-results" on storage.objects;
+create policy "Allow public read from photobooth-results"
+on storage.objects for select
+using ( bucket_id = 'photobooth-results' );
+
+-- Policy hapus dari bucket photobooth-results
+drop policy if exists "Allow public delete from photobooth-results" on storage.objects;
+create policy "Allow public delete from photobooth-results"
+on storage.objects for delete
+using ( bucket_id = 'photobooth-results' );
+
+-- Policy update ke bucket photobooth-results
+drop policy if exists "Allow public update to photobooth-results" on storage.objects;
+create policy "Allow public update to photobooth-results"
+on storage.objects for update
+using ( bucket_id = 'photobooth-results' );

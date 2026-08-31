@@ -60,10 +60,56 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(arrayBuffer)
     const fileName = `kurobooth-${shareCode}.png`
 
-    // 1. Try uploading to Catbox for 100% original uncompressed online link
+    // 1. Try Supabase storage first (primary permanent storage)
+    let supabaseUrl: string | null = null
+    if (isSupabaseConfigured()) {
+      try {
+        const { supabaseAdmin, supabase } = await import('@/lib/supabase')
+        const client = supabaseAdmin || supabase
+        const remotePath = `results/${shareCode}.png`
+
+        let { error: uploadError } = await client.storage
+          .from('photobooth-results')
+          .upload(remotePath, buffer, {
+            contentType: 'image/png',
+            upsert: true,
+          })
+
+        // If bucket not found, try auto-creating the bucket and re-uploading
+        if (uploadError && (uploadError.message?.toLowerCase().includes('bucket not found') || (uploadError as any).statusCode === '404')) {
+          console.log('[Upload] Bucket photobooth-results not found, attempting auto-creation...')
+          try {
+            await client.storage.createBucket('photobooth-results', { public: true })
+            const retry = await client.storage
+              .from('photobooth-results')
+              .upload(remotePath, buffer, {
+                contentType: 'image/png',
+                upsert: true,
+              })
+            uploadError = retry.error
+          } catch (createErr) {
+            console.warn('[Upload] Failed to auto-create bucket:', createErr)
+          }
+        }
+
+        if (!uploadError) {
+          const { data } = client.storage
+            .from('photobooth-results')
+            .getPublicUrl(remotePath)
+          supabaseUrl = data.publicUrl
+          console.log('[Upload] Supabase Storage upload success:', supabaseUrl)
+        } else {
+          console.error('[Upload] Supabase Storage upload error:', uploadError.message || uploadError)
+        }
+      } catch (e) {
+        console.error('[Upload] Supabase storage unexpected exception:', e)
+      }
+    }
+
+    // 2. Try Catbox as online backup/high-res link
     let catboxUrl = await uploadToCatbox(buffer, fileName)
 
-    // 2. Always write to local storage as fallback
+    // 3. Write to local storage as fallback for local dev
     let localUrl = `/uploads/results/${shareCode}.png`
     try {
       const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'results')
@@ -71,35 +117,11 @@ export async function POST(request: NextRequest) {
       const filePath = path.join(uploadDir, `${shareCode}.png`)
       await fs.writeFile(filePath, buffer)
     } catch (e) {
-      console.warn('Local disk write error:', e)
+      // Ignored in serverless read-only environments
     }
 
-    // 3. Try Supabase storage if configured
-    let supabaseUrl: string | null = null
-    if (isSupabaseConfigured()) {
-      try {
-        const { supabase } = await import('@/lib/supabase')
-        const remotePath = `results/${shareCode}.png`
-        const { error: uploadError } = await supabase.storage
-          .from('photobooth-results')
-          .upload(remotePath, buffer, {
-            contentType: 'image/png',
-            upsert: true,
-          })
-
-        if (!uploadError) {
-          const { data } = supabase.storage
-            .from('photobooth-results')
-            .getPublicUrl(remotePath)
-          supabaseUrl = data.publicUrl
-        }
-      } catch (e) {
-        console.warn('Supabase storage upload error:', e)
-      }
-    }
-
-    // Prefer online public URL (Catbox or Supabase) so QR codes work on phones, else local
-    const finalUrl = catboxUrl || supabaseUrl || localUrl
+    // Prefer Supabase or Catbox so QR codes and shares work everywhere
+    const finalUrl = supabaseUrl || catboxUrl || localUrl
 
     return NextResponse.json({
       url: finalUrl,
