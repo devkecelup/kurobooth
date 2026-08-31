@@ -97,12 +97,9 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(arrayBuffer)
     const fileName = `kurobooth-${shareCode}.png`
 
-    // 1. Try ImgBB first (Fast external image hosting - saves 100% Supabase storage space)
-    let imgbbUrl = await uploadToImgBB(buffer, fileName)
-
-    // 2. Try Supabase storage as backup or alternative
+    // 1. Primary: Upload directly to Supabase Storage bucket 'photobooth-results'
     let supabaseUrl: string | null = null
-    if (!imgbbUrl && isSupabaseConfigured()) {
+    if (isSupabaseConfigured()) {
       try {
         const { supabaseAdmin, supabase } = await import('@/lib/supabase')
         const client = supabaseAdmin || supabase
@@ -115,7 +112,7 @@ export async function POST(request: NextRequest) {
             upsert: true,
           })
 
-        // If bucket not found, try auto-creating the bucket and re-uploading
+        // Auto-create bucket if missing
         if (uploadError && (uploadError.message?.toLowerCase().includes('bucket not found') || (uploadError as any).statusCode === '404')) {
           console.log('[Upload] Bucket photobooth-results not found, attempting auto-creation...')
           try {
@@ -146,13 +143,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 3. Try Catbox as fallback
+    // 2. Fallback: Catbox
     let catboxUrl: string | null = null
-    if (!imgbbUrl && !supabaseUrl) {
+    if (!supabaseUrl) {
       catboxUrl = await uploadToCatbox(buffer, fileName)
     }
 
-    // 4. Write to local storage as fallback for local dev
+    // 3. Fallback: Local disk for development
     let localUrl = `/uploads/results/${shareCode}.png`
     try {
       const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'results')
@@ -160,15 +157,13 @@ export async function POST(request: NextRequest) {
       const filePath = path.join(uploadDir, `${shareCode}.png`)
       await fs.writeFile(filePath, buffer)
     } catch (e) {
-      // Ignored in serverless read-only environments
+      // Ignored in serverless
     }
 
-    // Prefer ImgBB or Supabase so QR codes and shares work everywhere
-    const finalUrl = imgbbUrl || supabaseUrl || catboxUrl || localUrl
+    const finalUrl = supabaseUrl || catboxUrl || localUrl
 
     return NextResponse.json({
       url: finalUrl,
-      imgbbUrl,
       supabaseUrl,
       catboxUrl,
       localUrl,

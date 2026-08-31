@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0D3B24"/>
+      <stop offset="100%" stop-color="#051B10"/>
+    </linearGradient>
+    <linearGradient id="lensGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34D399"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+    <linearGradient id="flashGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FDE047"/>
+      <stop offset="100%" stop-color="#EAB308"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background Rounded App Icon Container -->
+  <rect width="128" height="128" rx="28" fill="url(#bgGrad)" stroke="#10B981" stroke-width="3.5"/>
+
+  <!-- Camera Body -->
+  <rect x="22" y="38" width="84" height="60" rx="14" fill="#14462E" stroke="#34D399" stroke-width="3"/>
+  <!-- Camera Top Bar / Viewfinder Bump -->
+  <path d="M46 38 L52 28 H76 L82 38 Z" fill="#14462E" stroke="#34D399" stroke-width="3" stroke-linejoin="round"/>
+
+  <!-- Flash Lamp / Dot -->
+  <circle cx="86" cy="49" r="5" fill="url(#flashGrad)"/>
+
+  <!-- Lens Outer Ring -->
+  <circle cx="64" cy="68" r="22" fill="#0A2417" stroke="#34D399" stroke-width="3.5"/>
+  <!-- Lens Glass Reflection -->
+  <circle cx="64" cy="68" r="15" fill="url(#lensGrad)"/>
+  <circle cx="59" cy="63" r="5" fill="#FFFFFF" opacity="0.85"/>
+  <circle cx="70" cy="74" r="2.5" fill="#FFFFFF" opacity="0.5"/>
+
+  <!-- Sparkles / Aesthetic Star -->
+  <path d="M102 18 C102 24 106 28 112 28 C106 28 102 32 102 38 C102 32 98 28 92 28 C98 28 102 24 102 18 Z" fill="#FDE047"/>
+  <path d="M22 96 C22 100 24 102 28 102 C24 102 22 104 22 108 C22 104 20 102 16 102 C20 102 22 100 22 96 Z" fill="#34D399"/>
+</svg>
