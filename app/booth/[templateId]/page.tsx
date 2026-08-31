@@ -132,14 +132,14 @@ export default function BoothPage({ params }: Props) {
   async function handleSubmit() {
     if (!template) return
     setIsProcessing(true)
-    setError(null)
     try {
+      const scale = 2 // 2x scale for 300+ DPI Ultra HD print resolution (1200x3600 px)
       const canvas = document.createElement('canvas')
-      canvas.width = template.stripWidth
-      canvas.height = template.stripHeight
+      canvas.width = (template.stripWidth || 600) * scale
+      canvas.height = (template.stripHeight || 1800) * scale
       const ctx = canvas.getContext('2d')!
       const { renderStripToCanvas } = await import('@/lib/renderStrip')
-      await renderStripToCanvas(ctx, template, photos as string[], adjustments)
+      await renderStripToCanvas(ctx, template, photos as string[], adjustments, scale)
       const dataUrl = canvas.toDataURL('image/png')
       const blob = dataURLToBlob(dataUrl)
       const shareCode = generateShareCode()

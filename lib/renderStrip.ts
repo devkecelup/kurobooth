@@ -9,20 +9,26 @@ export async function renderStripToCanvas(
   ctx: CanvasRenderingContext2D,
   template: TemplateConfig,
   photos: string[],
-  adjustments?: (PhotoAdjustment | undefined)[]
+  adjustments?: (PhotoAdjustment | undefined)[],
+  scale: number = 2
 ): Promise<void> {
-  const W = template.stripWidth
-  const H = template.stripHeight
+  const baseW = template.stripWidth || 600
+  const baseH = template.stripHeight || 1800
+
+  ctx.save()
+  if (scale !== 1) {
+    ctx.scale(scale, scale)
+  }
 
   // 1. Draw solid background
   ctx.fillStyle = template.backgroundColor
-  ctx.fillRect(0, 0, W, H)
+  ctx.fillRect(0, 0, baseW, baseH)
 
   // 2. Draw background image if frameMode is 'background'
   if (template.frameImageUrl && template.frameMode === 'background') {
     try {
       const bgImg = await loadImage(template.frameImageUrl)
-      ctx.drawImage(bgImg, 0, 0, W, H)
+      ctx.drawImage(bgImg, 0, 0, baseW, baseH)
     } catch (err) {
       console.warn('Failed to load background frame image:', err)
     }
@@ -32,7 +38,7 @@ export async function renderStripToCanvas(
   if (!template.frameImageUrl) {
     ctx.strokeStyle = template.accentColor
     ctx.lineWidth = 3
-    ctx.strokeRect(10, 10, W - 20, H - 20)
+    ctx.strokeRect(10, 10, baseW - 20, baseH - 20)
   }
 
   // 4. Load and draw photos into slots
@@ -71,7 +77,7 @@ export async function renderStripToCanvas(
   if (template.frameImageUrl && template.frameMode !== 'background') {
     try {
       const frameImg = await loadImage(template.frameImageUrl)
-      ctx.drawImage(frameImg, 0, 0, W, H)
+      ctx.drawImage(frameImg, 0, 0, baseW, baseH)
     } catch (err) {
       console.warn('Failed to load overlay frame image:', err)
     }
@@ -132,4 +138,6 @@ export async function renderStripToCanvas(
 
     ctx.restore()
   })
+
+  ctx.restore()
 }

@@ -271,7 +271,7 @@ async function applyChromaKey(
       const detectedSlots = detectTransparentSlots(imgData, slotPadding)
       ctx.putImageData(imgData, 0, 0)
       resolve({
-        dataUrl: canvas.toDataURL('image/png'),
+        dataUrl: canvas.toDataURL('image/webp', 0.95),
         detectedSlots,
       })
     }

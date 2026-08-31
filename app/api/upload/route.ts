@@ -16,6 +16,43 @@ function isSupabaseConfigured(): boolean {
   )
 }
 
+const IMGBB_API_KEY = process.env.IMGBB_API_KEY ?? '18c5d23114ae652790650c0adc75cce0'
+
+/** Upload original high-res image to ImgBB (free unlimited image hosting) */
+async function uploadToImgBB(buffer: Buffer, fileName: string): Promise<string | null> {
+  if (!IMGBB_API_KEY) return null
+  try {
+    const formData = new FormData()
+    formData.append('key', IMGBB_API_KEY)
+    formData.append('image', buffer.toString('base64'))
+    formData.append('name', fileName.replace(/\.[^/.]+$/, ''))
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 9000)
+
+    const res = await fetch('https://api.imgbb.com/1/upload', {
+      method: 'POST',
+      body: formData,
+      signal: controller.signal,
+    })
+    clearTimeout(timeout)
+
+    if (res.ok) {
+      const data = await res.json()
+      if (data?.data?.url) {
+        console.log('[Upload] ImgBB upload success:', data.data.url)
+        return data.data.url
+      }
+    } else {
+      const errText = await res.text()
+      console.warn('[Upload] ImgBB error response:', errText)
+    }
+  } catch (err) {
+    console.warn('[Upload] ImgBB upload failed:', err)
+  }
+  return null
+}
+
 /** Upload lossless image to Catbox.moe (permanent free hosting without recompression) */
 async function uploadToCatbox(buffer: Buffer, fileName: string): Promise<string | null> {
   try {
@@ -25,7 +62,7 @@ async function uploadToCatbox(buffer: Buffer, fileName: string): Promise<string 
     formData.append('fileToUpload', blob, fileName)
 
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 8000)
+    const timeout = setTimeout(() => controller.abort(), 6000)
 
     const res = await fetch('https://catbox.moe/user/api.php', {
       method: 'POST',
@@ -60,9 +97,12 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(arrayBuffer)
     const fileName = `kurobooth-${shareCode}.png`
 
-    // 1. Try Supabase storage first (primary permanent storage)
+    // 1. Try ImgBB first (Fast external image hosting - saves 100% Supabase storage space)
+    let imgbbUrl = await uploadToImgBB(buffer, fileName)
+
+    // 2. Try Supabase storage as backup or alternative
     let supabaseUrl: string | null = null
-    if (isSupabaseConfigured()) {
+    if (!imgbbUrl && isSupabaseConfigured()) {
       try {
         const { supabaseAdmin, supabase } = await import('@/lib/supabase')
         const client = supabaseAdmin || supabase
@@ -106,10 +146,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 2. Try Catbox as online backup/high-res link
-    let catboxUrl = await uploadToCatbox(buffer, fileName)
+    // 3. Try Catbox as fallback
+    let catboxUrl: string | null = null
+    if (!imgbbUrl && !supabaseUrl) {
+      catboxUrl = await uploadToCatbox(buffer, fileName)
+    }
 
-    // 3. Write to local storage as fallback for local dev
+    // 4. Write to local storage as fallback for local dev
     let localUrl = `/uploads/results/${shareCode}.png`
     try {
       const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'results')
@@ -120,13 +163,14 @@ export async function POST(request: NextRequest) {
       // Ignored in serverless read-only environments
     }
 
-    // Prefer Supabase or Catbox so QR codes and shares work everywhere
-    const finalUrl = supabaseUrl || catboxUrl || localUrl
+    // Prefer ImgBB or Supabase so QR codes and shares work everywhere
+    const finalUrl = imgbbUrl || supabaseUrl || catboxUrl || localUrl
 
     return NextResponse.json({
       url: finalUrl,
-      catboxUrl,
+      imgbbUrl,
       supabaseUrl,
+      catboxUrl,
       localUrl,
     }, { status: 200 })
   } catch (err) {
