@@ -175,65 +175,85 @@ function cleanIsolatedSpecks(imgData: ImageData, maxSpeckSize: number = 1000) {
   }
 }
 
-function detectTransparentSlots(imgData: ImageData, pad: number = 15): { x: number, y: number, width: number, height: number, borderRadius: number }[] {
+function detectTransparentSlots(imgData: ImageData, pad: number = 15): SlotDef[] {
   const { width, height, data } = imgData
 
-  const rowTransparentCount = new Array(height).fill(0)
+  const isTransparent = new Uint8Array(width * height)
+  for (let i = 0; i < width * height; i++) {
+    if (data[i * 4 + 3] < 100) {
+      isTransparent[i] = 1
+    }
+  }
+
+  const visited = new Uint8Array(width * height)
+  const minSlotArea = Math.floor(width * height * 0.01)
+  const minSlotDimension = Math.floor(Math.min(width, height) * 0.08)
+
+  const rawSlots: { xMin: number; xMax: number; yMin: number; yMax: number; area: number }[] = []
+
   for (let y = 0; y < height; y++) {
-    let transparentPixels = 0
     for (let x = 0; x < width; x++) {
-      const idx = (y * width + x) * 4
-      if (data[idx + 3] < 100) {
-        transparentPixels++
-      }
-    }
-    if (transparentPixels > width * 0.15) {
-      rowTransparentCount[y] = 1
-    }
-  }
+      const idx = y * width + x
+      if (!isTransparent[idx] || visited[idx]) continue
 
-  const segments: { yStart: number, yEnd: number }[] = []
-  let inSegment = false
-  let yStart = 0
-  for (let y = 0; y < height; y++) {
-    if (rowTransparentCount[y] && !inSegment) {
-      inSegment = true
-      yStart = y
-    } else if (!rowTransparentCount[y] && inSegment) {
-      inSegment = false
-      if (y - yStart > 80) {
-        segments.push({ yStart, yEnd: y })
-      }
-    }
-  }
-  if (inSegment && height - yStart > 80) {
-    segments.push({ yStart, yEnd: height })
-  }
+      let xMin = x
+      let xMax = x
+      let yMin = y
+      let yMax = y
+      let area = 0
 
-  if (segments.length === 0) return []
+      const queue = [idx]
+      visited[idx] = 1
+      let head = 0
 
-  const detectedSlots = segments.map(seg => {
-    let xMin = width
-    let xMax = 0
-    for (let y = seg.yStart; y < seg.yEnd; y++) {
-      for (let x = 0; x < width; x++) {
-        const idx = (y * width + x) * 4
-        if (data[idx + 3] < 100) {
-          if (x < xMin) xMin = x
-          if (x > xMax) xMax = x
+      while (head < queue.length) {
+        const curr = queue[head++]
+        const cx = curr % width
+        const cy = Math.floor(curr / width)
+        area++
+
+        if (cx < xMin) xMin = cx
+        if (cx > xMax) xMax = cx
+        if (cy < yMin) yMin = cy
+        if (cy > yMax) yMax = cy
+
+        const neighbors = [
+          cy > 0 ? curr - width : -1,
+          cy < height - 1 ? curr + width : -1,
+          cx > 0 ? curr - 1 : -1,
+          cx < width - 1 ? curr + 1 : -1,
+        ]
+
+        for (const n of neighbors) {
+          if (n >= 0 && isTransparent[n] && !visited[n]) {
+            visited[n] = 1
+            queue.push(n)
+          }
         }
       }
-    }
 
-    if (xMin >= xMax) {
-      xMin = 30
-      xMax = width - 30
-    }
+      const w = xMax - xMin + 1
+      const h = yMax - yMin + 1
 
-    const slotX = Math.max(0, xMin - pad)
-    const slotY = Math.max(0, seg.yStart - pad)
-    const slotW = Math.min(width - slotX, (xMax - xMin) + pad * 2)
-    const slotH = Math.min(height - slotY, (seg.yEnd - seg.yStart) + pad * 2)
+      if (area >= minSlotArea && w >= minSlotDimension && h >= minSlotDimension) {
+        rawSlots.push({ xMin, xMax, yMin, yMax, area })
+      }
+    }
+  }
+
+  if (rawSlots.length === 0) return []
+
+  rawSlots.sort((a, b) => {
+    const yDiff = a.yMin - b.yMin
+    if (Math.abs(yDiff) > 50) return yDiff
+    return a.xMin - b.xMin
+  })
+
+  return rawSlots.map(slot => {
+    const slotX = Math.max(0, slot.xMin - pad)
+    const slotY = Math.max(0, slot.yMin - pad)
+    const slotW = Math.min(width - slotX, (slot.xMax - slot.xMin) + pad * 2)
+    const slotH = Math.min(height - slotY, (slot.yMax - slot.yMin) + pad * 2)
 
     return {
       x: slotX,
@@ -243,14 +263,9 @@ function detectTransparentSlots(imgData: ImageData, pad: number = 15): { x: numb
       borderRadius: 16,
     }
   })
-
-  return detectedSlots
 }
 
-// Process Image Chroma Key — uses flood-fill from image border so ONLY
-// pixels connected to the chroma-colored "background" are made transparent.
-// Frame decoration that coincidentally shares the chroma color is protected
-// because it is not reachable from the image edge.
+// Process Image Chroma Key with dynamic aspect ratio preservation
 async function applyChromaKey(
   imageSrc: string,
   chromaHex: string,
@@ -258,19 +273,25 @@ async function applyChromaKey(
   smoothness: number = 5,
   slotPadding: number = 15,
   despeckle: number = 600
-): Promise<{ dataUrl: string, detectedSlots: SlotDef[] }> {
+): Promise<{ dataUrl: string; detectedSlots: SlotDef[]; width: number; height: number }> {
   return new Promise((resolve) => {
     const img = new Image()
     img.crossOrigin = 'anonymous'
     img.onload = () => {
-      const canvas = document.createElement('canvas')
-      canvas.width = img.naturalWidth || 600
-      canvas.height = img.naturalHeight || 1800
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return resolve({ dataUrl: imageSrc, detectedSlots: [] })
+      const naturalW = img.naturalWidth || 600
+      const naturalH = img.naturalHeight || 1800
+      const ratio = naturalW / naturalH
+      const baseHeight = 1800
+      const calculatedWidth = Math.round(baseHeight * ratio)
 
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      const canvas = document.createElement('canvas')
+      canvas.width = calculatedWidth
+      canvas.height = baseHeight
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return resolve({ dataUrl: imageSrc, detectedSlots: [], width: calculatedWidth, height: baseHeight })
+
+      ctx.drawImage(img, 0, 0, calculatedWidth, baseHeight)
+      const imgData = ctx.getImageData(0, 0, calculatedWidth, baseHeight)
       const data = imgData.data
       const { width, height } = imgData
 
@@ -341,7 +362,6 @@ async function applyChromaKey(
         for (const n of neighbors) { if (n >= 0) enqueueNeighbor(n) }
       }
 
-
       // Phase 2: interior enclosed chroma pockets (photo slots)
       for (let y = 2; y < height - 2; y++) {
         for (let x = 2; x < width - 2; x++) {
@@ -397,9 +417,11 @@ async function applyChromaKey(
       resolve({
         dataUrl: canvas.toDataURL('image/webp', 0.95),
         detectedSlots,
+        width: calculatedWidth,
+        height: baseHeight,
       })
     }
-    img.onerror = () => resolve({ dataUrl: imageSrc, detectedSlots: [] })
+    img.onerror = () => resolve({ dataUrl: imageSrc, detectedSlots: [], width: 600, height: 1800 })
     img.src = imageSrc
   })
 }
@@ -461,6 +483,7 @@ export default function AdminPage() {
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null)
 
   // Form State for Canva Template Creation
+  const [formFrameDimensions, setFormFrameDimensions] = useState<{ width: number; height: number }>({ width: 600, height: 1800 })
   const [formName, setFormName] = useState('')
   const [formDesc, setFormDesc] = useState('')
   const [formPreset, setFormPreset] = useState<'2-vert' | '3-vert' | '4-vert' | '6-grid'>('4-vert')
@@ -479,6 +502,25 @@ export default function AdminPage() {
   const [isSavingTemplate, setIsSavingTemplate] = useState(false)
   const [formError, setFormError] = useState('')
 
+  // Interactive Mascot Modal Alert & Confirm State
+  const [mascotModal, setMascotModal] = useState<{
+    isOpen: boolean
+    type?: 'success' | 'confirm' | 'danger'
+    title: string
+    message: string
+    pose: 'waving' | 'camera' | 'sparkle' | 'artist' | 'searching' | 'happy' | 'lost'
+    speechText?: string
+    confirmText?: string
+    cancelText?: string
+    onConfirm?: () => void
+  }>({
+    isOpen: false,
+    type: 'success',
+    title: '',
+    message: '',
+    pose: 'happy',
+  })
+
   const reprocessChroma = useCallback(async (
     src: string,
     color: string,
@@ -491,9 +533,16 @@ export default function AdminPage() {
     try {
       const result = await applyChromaKey(src, color, tol, smooth, pad, 1200)
       setProcessedFrameUrl(result.dataUrl)
+      if (result.width && result.height) {
+        setFormFrameDimensions({ width: result.width, height: result.height })
+      }
       if (result.detectedSlots && result.detectedSlots.length > 0) {
         setFormSlots(result.detectedSlots)
-        // Note: Admin page might not have a generic 'preset' UI button state, it uses formSlots directly.
+        setDetectedSlotCount(result.detectedSlots.length)
+        if (result.detectedSlots.length === 2) setFormPreset('2-vert')
+        else if (result.detectedSlots.length === 3) setFormPreset('3-vert')
+        else if (result.detectedSlots.length === 4) setFormPreset('4-vert')
+        else if (result.detectedSlots.length >= 6) setFormPreset('6-grid')
       }
     } finally {
       setIsProcessingChroma(false)
@@ -592,7 +641,7 @@ export default function AdminPage() {
   }
 
   // Approve pending template
-  async function handleApprove(id: string) {
+  async function handleApprove(id: string, name?: string) {
     try {
       const res = await fetch(`/api/templates?id=${encodeURIComponent(id)}&action=approve`, {
         method: 'PATCH',
@@ -600,62 +649,131 @@ export default function AdminPage() {
       })
       if (res.ok) {
         setTemplates(prev => prev.map(t => t.id === id ? { ...t, isActive: true } : t))
-        setActionSuccessMsg('Template berhasil disetujui dan diterbitkan ke galeri publik!')
-        setTimeout(() => setActionSuccessMsg(null), 3500)
         loadTemplates(secret)
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('kurobooth:templates-updated'))
         }
+        setMascotModal({
+          isOpen: true,
+          type: 'success',
+          title: 'Template Berhasil Disetujui! 🎉',
+          message: `Template "${name || 'Komunitas'}" sekarang resmi aktif dan sudah tampil di galeri publik untuk seluruh pengunjung!`,
+          pose: 'sparkle',
+          speechText: 'Hore! Template keren ini resmi tayang! ✨',
+          confirmText: 'Mantap!',
+        })
       }
     } catch (e) {
       console.error('Approve error:', e)
     }
   }
 
-  // Reject / Delete template immediately
-  async function handleDelete(id: string, isReject: boolean = false) {
-    const promptText = isReject
-      ? 'Apakah Anda yakin ingin MENOLAK dan MENGHAPUS template sumbangan ini?'
-      : 'Apakah Anda yakin ingin menghapus template ini?'
-    if (!confirm(promptText)) return
-
-    setDeleteId(id)
-    try {
-      const res = await fetch(`/api/templates?id=${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        headers: { 'x-admin-secret': secret },
-      })
-      if (res.ok) {
-        setTemplates(prev => prev.filter(t => t.id !== id))
-        setActionSuccessMsg(isReject ? 'Template berhasil ditolak dan dihapus.' : 'Template berhasil dihapus.')
-        setTimeout(() => setActionSuccessMsg(null), 3500)
-        loadTemplates(secret)
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('kurobooth:templates-updated'))
+  // Reject / Delete template with Mascot Confirm Dialog
+  function handleDelete(id: string, isReject: boolean = false, name?: string) {
+    setMascotModal({
+      isOpen: true,
+      type: 'danger',
+      title: isReject ? 'Tolak Template Komunitas?' : 'Hapus Template?',
+      message: isReject
+        ? `Apakah kamu yakin ingin menolak & menghapus template "${name || 'ini'}"? Template tidak akan diterbitkan ke publik.`
+        : `Apakah kamu yakin ingin menghapus template "${name || 'ini'}" secara permanen dari sistem?`,
+      pose: isReject ? 'artist' : 'lost',
+      speechText: isReject ? 'Yakin mau tolak template ini? 🤔' : 'Aksi ini tidak bisa dibatalkan yaa! ⚠️',
+      confirmText: isReject ? 'Ya, Tolak Template' : 'Ya, Hapus Template',
+      cancelText: 'Batal',
+      onConfirm: async () => {
+        setDeleteId(id)
+        try {
+          const res = await fetch(`/api/templates?id=${encodeURIComponent(id)}`, {
+            method: 'DELETE',
+            headers: { 'x-admin-secret': secret },
+          })
+          if (res.ok) {
+            setTemplates(prev => prev.filter(t => t.id !== id))
+            loadTemplates(secret)
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('kurobooth:templates-updated'))
+            }
+          }
+        } catch (e) {
+          console.error('Delete template error:', e)
+        } finally {
+          setDeleteId(null)
         }
-      }
-    } catch (e) {
-      console.error('Delete template error:', e)
-    } finally {
-      setDeleteId(null)
-    }
+      },
+    })
   }
 
-  // Delete session
-  async function handleDeleteSession(shareCode: string) {
-    if (!confirm('Apakah kamu yakin ingin menghapus foto sesi ini?')) return
-    try {
-      const res = await fetch(`/api/admin/sessions?shareCode=${encodeURIComponent(shareCode)}&secret=${encodeURIComponent(secret)}`, {
-        method: 'DELETE',
-      })
-      if (res.ok) {
-        setSessions(prev => prev.filter(s => s.share_code !== shareCode))
-        setActionSuccessMsg('Riwayat foto sesi berhasil dihapus.')
-        setTimeout(() => setActionSuccessMsg(null), 3500)
+  // Delete session with Mascot Confirm Dialog
+  function handleDeleteSession(shareCode: string) {
+    setMascotModal({
+      isOpen: true,
+      type: 'danger',
+      title: 'Hapus Riwayat Sesi Foto?',
+      message: `Riwayat foto dengan share code #${shareCode} akan dihapus permanen dari sistem beserta file fotonya.`,
+      pose: 'camera',
+      speechText: 'Foto sesi ini akan dihapus permanen! 📸',
+      confirmText: 'Ya, Hapus Sesi',
+      cancelText: 'Batal',
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/admin/sessions?shareCode=${encodeURIComponent(shareCode)}&secret=${encodeURIComponent(secret)}`, {
+            method: 'DELETE',
+          })
+          if (res.ok) {
+            setSessions(prev => prev.filter(s => s.share_code !== shareCode))
+          }
+        } catch (e) {
+          console.error('Delete session error:', e)
+        }
+      },
+    })
+  }
+
+  function handlePresetChange(p: '2-vert' | '3-vert' | '4-vert' | '6-grid') {
+    setFormPreset(p)
+    const W = formFrameDimensions.width
+    const H = formFrameDimensions.height
+    const isDouble = W / H > 0.5
+
+    if (isDouble) {
+      const colW = Math.floor((W - 120) / 2)
+      const col1X = 40
+      const col2X = W - colW - 40
+      if (p === '6-grid' || p === '3-vert') {
+        const rowH = Math.floor((H - 240) / 3)
+        setFormSlots([
+          { x: col1X, y: 70, width: colW, height: rowH, borderRadius: 12 },
+          { x: col2X, y: 70, width: colW, height: rowH, borderRadius: 12 },
+          { x: col1X, y: 70 + rowH + 40, width: colW, height: rowH, borderRadius: 12 },
+          { x: col2X, y: 70 + rowH + 40, width: colW, height: rowH, borderRadius: 12 },
+          { x: col1X, y: 70 + (rowH + 40) * 2, width: colW, height: rowH, borderRadius: 12 },
+          { x: col2X, y: 70 + (rowH + 40) * 2, width: colW, height: rowH, borderRadius: 12 },
+        ])
+      } else if (p === '2-vert') {
+        const rowH = Math.floor((H - 220) / 2)
+        setFormSlots([
+          { x: col1X, y: 80, width: colW, height: rowH, borderRadius: 14 },
+          { x: col2X, y: 80, width: colW, height: rowH, borderRadius: 14 },
+          { x: col1X, y: 80 + rowH + 50, width: colW, height: rowH, borderRadius: 14 },
+          { x: col2X, y: 80 + rowH + 50, width: colW, height: rowH, borderRadius: 14 },
+        ])
+      } else {
+        const rowH = Math.floor((H - 300) / 4)
+        setFormSlots([
+          { x: col1X, y: 60, width: colW, height: rowH, borderRadius: 8 },
+          { x: col2X, y: 60, width: colW, height: rowH, borderRadius: 8 },
+          { x: col1X, y: 60 + rowH + 30, width: colW, height: rowH, borderRadius: 8 },
+          { x: col2X, y: 60 + rowH + 30, width: colW, height: rowH, borderRadius: 8 },
+        ])
       }
-    } catch (e) {
-      console.error('Delete session error:', e)
+    } else {
+      if (p === '2-vert') setFormSlots(PRESET_2_VERTICAL)
+      if (p === '3-vert') setFormSlots(PRESET_3_VERTICAL)
+      if (p === '4-vert') setFormSlots(PRESET_4_VERTICAL)
+      if (p === '6-grid') setFormSlots(PRESET_6_GRID)
     }
+    setDetectedSlotCount(0)
   }
 
   // Chroma key image handlers for creator
@@ -668,16 +786,24 @@ export default function AdminPage() {
         const base64 = event.target.result as string
         setRawImageSrc(base64)
         setProcessedFrameUrl('')
-        
-        // Auto-detect transparency
+
+        // Auto-detect aspect ratio & transparency
         const img = new Image()
         img.onload = () => {
+          const naturalW = img.naturalWidth || 600
+          const naturalH = img.naturalHeight || 1800
+          const ratio = naturalW / naturalH
+          const baseHeight = 1800
+          const calculatedWidth = Math.round(baseHeight * ratio)
+
+          setFormFrameDimensions({ width: calculatedWidth, height: baseHeight })
+
           const c = document.createElement('canvas')
-          c.width = img.naturalWidth
-          c.height = img.naturalHeight
+          c.width = calculatedWidth
+          c.height = baseHeight
           const cx = c.getContext('2d')
           if (!cx) return
-          cx.drawImage(img, 0, 0)
+          cx.drawImage(img, 0, 0, calculatedWidth, baseHeight)
           const { data } = cx.getImageData(0, 0, c.width, c.height)
           let transparentCount = 0
           for (let i = 3; i < data.length; i += 4) {
@@ -687,11 +813,16 @@ export default function AdminPage() {
           if (transparentRatio > 0.05) {
             // Gambar sudah transparan — bypass chroma
             setProcessedFrameUrl(base64)
-            // Lakukan deteksi slot
+            // Lakukan deteksi slot 2D otomatis
             const imgData = cx.getImageData(0, 0, c.width, c.height)
             const detected = detectTransparentSlots(imgData, slotPadding)
             if (detected && detected.length > 0) {
               setFormSlots(detected)
+              setDetectedSlotCount(detected.length)
+              if (detected.length === 2) setFormPreset('2-vert')
+              else if (detected.length === 3) setFormPreset('3-vert')
+              else if (detected.length === 4) setFormPreset('4-vert')
+              else if (detected.length >= 6) setFormPreset('6-grid')
             }
           } else {
             reprocessChroma(base64, chromaColor, chromaTolerance, chromaSmoothness, slotPadding)
@@ -722,12 +853,12 @@ export default function AdminPage() {
   function handleImageCanvasClick(e: React.MouseEvent<HTMLImageElement>) {
     const img = e.currentTarget
     const rect = img.getBoundingClientRect()
-    const x = Math.floor(((e.clientX - rect.left) / rect.width) * (img.naturalWidth || 600))
-    const y = Math.floor(((e.clientY - rect.top) / rect.height) * (img.naturalHeight || 1800))
+    const x = Math.floor(((e.clientX - rect.left) / rect.width) * (img.naturalWidth || formFrameDimensions.width))
+    const y = Math.floor(((e.clientY - rect.top) / rect.height) * (img.naturalHeight || formFrameDimensions.height))
 
     const canvas = document.createElement('canvas')
-    canvas.width = img.naturalWidth || 600
-    canvas.height = img.naturalHeight || 1800
+    canvas.width = img.naturalWidth || formFrameDimensions.width
+    canvas.height = img.naturalHeight || formFrameDimensions.height
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
@@ -753,7 +884,6 @@ export default function AdminPage() {
       if (finalFrameUrl && finalFrameUrl.startsWith('data:')) {
         try {
           const { generateShareCode } = await import('@/lib/utils')
-          // Convert JPG/PNG frame to WebP for faster loading
           const webpDataUrl = await convertToWebP(finalFrameUrl, 0.92)
           const frameCode = 'frame-admin-' + generateShareCode()
           const webpBlob = dataUrlToWebPBlob(webpDataUrl)
@@ -770,13 +900,15 @@ export default function AdminPage() {
         }
       }
 
+      const isDoubleOrWide = formFrameDimensions.width / formFrameDimensions.height > 0.5
+
       const payload = {
         id: editingTemplateId || undefined,
         name: formName,
         description: formDesc.trim() || 'Template kustom dari Canva',
         photoCount: formSlots.length,
-        stripWidth: 600,
-        stripHeight: 1800,
+        stripWidth: formFrameDimensions.width,
+        stripHeight: formFrameDimensions.height,
         backgroundColor: formBgColor,
         accentColor: formAccentColor,
         textColor: '#0C1E14',
@@ -784,7 +916,7 @@ export default function AdminPage() {
         frameMode: 'overlay',
         slots: formSlots,
         tags: formTags.split(',').map(t => t.trim()).filter(Boolean),
-        printSize: '2x6',
+        printSize: isDoubleOrWide ? '4x6' : '2x6',
       }
 
       const res = await fetch('/api/templates', {
@@ -798,18 +930,31 @@ export default function AdminPage() {
 
       const data = await res.json()
       if (res.ok) {
-        setActionSuccessMsg(editingTemplateId ? `Template "${formName}" berhasil diperbarui!` : 'Template Canva berhasil disimpan dan langsung aktif!')
-        setTimeout(() => setActionSuccessMsg(null), 3500)
+        const isEdit = Boolean(editingTemplateId)
+        const savedName = formName
         setEditingTemplateId(null)
         setFormName('')
         setFormDesc('')
         setRawImageSrc('')
         setProcessedFrameUrl('')
+        setFormSlots(PRESET_4_VERTICAL)
+        setFormFrameDimensions({ width: 600, height: 1800 })
         loadTemplates(secret)
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('kurobooth:templates-updated'))
         }
         setActiveTab('templates')
+        setMascotModal({
+          isOpen: true,
+          type: 'success',
+          title: isEdit ? 'Template Berhasil Diperbarui! ✏️' : 'Template Berhasil Diterbitkan! 🎉',
+          message: isEdit
+            ? `Perubahan pada template "${savedName}" berhasil disimpan dan langsung aktif di galeri.`
+            : `Template "${savedName}" berhasil dibuat dan sekarang sudah langsung bisa digunakan oleh pengunjung!`,
+          pose: 'sparkle',
+          speechText: isEdit ? 'Update template berhasil disimpan! 🌟' : 'Template baru langsung tayang! 🎨',
+          confirmText: 'Lihat Daftar Template',
+        })
       } else {
         setFormError(data.error || 'Gagal menyimpan template.')
       }
@@ -829,6 +974,7 @@ export default function AdminPage() {
     setFormAccentColor(t.accentColor || '#0D3B24')
     setFormTags((t.tags || []).join(', '))
     setFormSlots(t.slots || PRESET_4_VERTICAL)
+    setFormFrameDimensions({ width: t.stripWidth || 600, height: t.stripHeight || 1800 })
     setRawImageSrc(t.frameImageUrl || '')
     setProcessedFrameUrl(t.frameImageUrl || '')
     setFormPreset(t.slots.length === 2 ? '2-vert' : t.slots.length === 3 ? '3-vert' : t.slots.length === 6 ? '6-grid' : '4-vert')
@@ -845,6 +991,7 @@ export default function AdminPage() {
     setFormAccentColor('#0D3B24')
     setFormTags('canva, strip')
     setFormSlots(PRESET_4_VERTICAL)
+    setFormFrameDimensions({ width: 600, height: 1800 })
     setRawImageSrc('')
     setProcessedFrameUrl('')
     setFormPreset('4-vert')
@@ -1184,7 +1331,7 @@ export default function AdminPage() {
                         <div className={styles.cardActions}>
                           <button
                             className="btn btn-primary btn-sm"
-                            onClick={() => handleApprove(t.id)}
+                            onClick={() => handleApprove(t.id, t.name)}
                             style={{ flex: 1, background: '#10B981', borderColor: '#059669' }}
                           >
                             <CheckCircleIcon size={14} />
@@ -1200,7 +1347,7 @@ export default function AdminPage() {
                           </button>
                           <button
                             className={styles.deleteBtn}
-                            onClick={() => handleDelete(t.id, true)}
+                            onClick={() => handleDelete(t.id, true, t.name)}
                             disabled={deleteId === t.id}
                             title="Tolak dan Hapus Template"
                           >
@@ -1339,7 +1486,7 @@ export default function AdminPage() {
                             <>
                               <button
                                 className="btn btn-primary btn-sm"
-                                onClick={() => handleApprove(t.id)}
+                                onClick={() => handleApprove(t.id, t.name)}
                                 style={{ flex: 1, background: '#10B981', borderColor: '#059669' }}
                               >
                                 <CheckCircleIcon size={14} />
@@ -1355,7 +1502,7 @@ export default function AdminPage() {
                               </button>
                               <button
                                 className={styles.deleteBtn}
-                                onClick={() => handleDelete(t.id, true)}
+                                onClick={() => handleDelete(t.id, true, t.name)}
                                 disabled={deleteId === t.id}
                                 title="Tolak dan Hapus Template"
                               >
@@ -1383,7 +1530,7 @@ export default function AdminPage() {
                               </button>
                               <button
                                 className={styles.deleteBtn}
-                                onClick={() => handleDelete(t.id)}
+                                onClick={() => handleDelete(t.id, false, t.name)}
                                 disabled={deleteId === t.id}
                                 title="Hapus template"
                               >
@@ -1676,28 +1823,28 @@ export default function AdminPage() {
                     <button
                       type="button"
                       className={`${styles.presetBtn} ${formPreset === '2-vert' ? styles.presetBtnActive : ''}`}
-                      onClick={() => { setFormPreset('2-vert'); setFormSlots(PRESET_2_VERTICAL); setDetectedSlotCount(0) }}
+                      onClick={() => handlePresetChange('2-vert')}
                     >
                       2 Foto Vertikal
                     </button>
                     <button
                       type="button"
                       className={`${styles.presetBtn} ${formPreset === '3-vert' ? styles.presetBtnActive : ''}`}
-                      onClick={() => { setFormPreset('3-vert'); setFormSlots(PRESET_3_VERTICAL); setDetectedSlotCount(0) }}
+                      onClick={() => handlePresetChange('3-vert')}
                     >
                       3 Foto Vertikal
                     </button>
                     <button
                       type="button"
                       className={`${styles.presetBtn} ${formPreset === '4-vert' ? styles.presetBtnActive : ''}`}
-                      onClick={() => { setFormPreset('4-vert'); setFormSlots(PRESET_4_VERTICAL); setDetectedSlotCount(0) }}
+                      onClick={() => handlePresetChange('4-vert')}
                     >
                       4 Foto Vertikal
                     </button>
                     <button
                       type="button"
                       className={`${styles.presetBtn} ${formPreset === '6-grid' ? styles.presetBtnActive : ''}`}
-                      onClick={() => { setFormPreset('6-grid'); setFormSlots(PRESET_6_GRID); setDetectedSlotCount(0) }}
+                      onClick={() => handlePresetChange('6-grid')}
                     >
                       6 Foto Grid
                     </button>
@@ -1711,7 +1858,9 @@ export default function AdminPage() {
                     <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>
                       {rawImageSrc ? 'Ganti File Frame Canva' : 'Pilih Gambar Frame Canva (PNG/JPG)'}
                     </span>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Rasio ideal 1:3 (600 × 1800 px) 300 DPI</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      Mendukung 1 Strip (600×1800) dan Double Strip 4×6 (1200×1800)
+                    </span>
                     <input type="file" accept="image/*" onChange={handleImageUpload} style={{ display: 'none' }} />
                   </label>
                 </div>
@@ -1908,8 +2057,8 @@ export default function AdminPage() {
                       name: formName || 'Preview Template',
                       description: formDesc,
                       photoCount: formSlots.length,
-                      stripWidth: 600,
-                      stripHeight: 1800,
+                      stripWidth: formFrameDimensions.width,
+                      stripHeight: formFrameDimensions.height,
                       backgroundColor: formBgColor,
                       accentColor: formAccentColor,
                       textColor: '#0C1E14',
@@ -1917,7 +2066,7 @@ export default function AdminPage() {
                       frameMode: 'overlay',
                       slots: formSlots,
                       tags: formTags.split(',').map(t => t.trim()).filter(Boolean),
-                      printSize: '2x6',
+                      printSize: formFrameDimensions.width / formFrameDimensions.height > 0.5 ? '4x6' : '2x6',
                     }}
                     priority
                   />
@@ -1939,6 +2088,71 @@ export default function AdminPage() {
               <CloseIcon size={16} />
             </button>
             <img src={previewLightboxImg} alt="Preview Hasil Full" className={styles.lightboxImg} />
+          </div>
+        </div>
+      )}
+
+      {/* Mascot Interactive Alert / Confirm Modal */}
+      {mascotModal.isOpen && (
+        <div className={styles.mascotModalOverlay} onClick={() => setMascotModal(prev => ({ ...prev, isOpen: false }))}>
+          <div className={styles.mascotModalCard} onClick={(e) => e.stopPropagation()}>
+            <button
+              className={styles.mascotModalClose}
+              onClick={() => setMascotModal(prev => ({ ...prev, isOpen: false }))}
+              aria-label="Tutup dialog"
+            >
+              <CloseIcon size={16} />
+            </button>
+
+            <div className={styles.mascotModalBody}>
+              <Mascot
+                pose={mascotModal.pose}
+                size="lg"
+                animated
+                showSpeech={Boolean(mascotModal.speechText)}
+                speechText={mascotModal.speechText}
+              />
+
+              <div className={styles.mascotModalContent}>
+                <h3 className={styles.mascotModalTitle}>{mascotModal.title}</h3>
+                <p className={styles.mascotModalMessage}>{mascotModal.message}</p>
+              </div>
+
+              <div className={styles.mascotModalActions}>
+                {mascotModal.type === 'confirm' || mascotModal.type === 'danger' ? (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setMascotModal(prev => ({ ...prev, isOpen: false }))}
+                    >
+                      <span>{mascotModal.cancelText || 'Batal'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn ${mascotModal.type === 'danger' ? 'btn-danger' : 'btn-primary'}`}
+                      onClick={() => {
+                        const action = mascotModal.onConfirm
+                        setMascotModal(prev => ({ ...prev, isOpen: false }))
+                        action?.()
+                      }}
+                      style={mascotModal.type === 'danger' ? { background: '#DC2626', color: '#FFFFFF', borderColor: '#DC2626' } : undefined}
+                    >
+                      <span>{mascotModal.confirmText || 'Konfirmasi'}</span>
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => setMascotModal(prev => ({ ...prev, isOpen: false }))}
+                    style={{ minWidth: '140px' }}
+                  >
+                    <span>{mascotModal.confirmText || 'Mengerti'}</span>
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

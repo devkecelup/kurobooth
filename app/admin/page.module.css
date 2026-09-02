@@ -781,12 +781,15 @@
 }
 
 .previewWrap {
-  width: 200px;
-  height: 420px;
+  width: 100%;
+  max-width: 260px;
   border-radius: var(--radius-md);
   overflow: hidden;
-  box-shadow: var(--shadow-md);
-  background: #FFFFFF;
+  box-shadow: 0 8px 24px rgba(12, 30, 20, 0.12);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .emptyState {
@@ -966,4 +969,85 @@
   .formGrid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Mascot Interactive Alert / Confirm Modal */
+.mascotModalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  background: rgba(12, 30, 20, 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: fadeIn 0.2s ease;
+}
+
+.mascotModalCard {
+  background: #FFFFFF;
+  border-radius: var(--radius-xl);
+  border: 1.5px solid var(--border);
+  width: 100%;
+  max-width: 440px;
+  padding: 32px 24px 24px;
+  box-shadow: 0 24px 60px rgba(12, 30, 20, 0.3);
+  position: relative;
+  text-align: center;
+  animation: popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.mascotModalClose {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.mascotModalClose:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+}
+
+.mascotModalBody {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.mascotModalTitle {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin-top: 4px;
+}
+
+.mascotModalMessage {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  max-width: 360px;
+  margin-top: 4px;
+}
+
+.mascotModalActions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  margin-top: 8px;
 }

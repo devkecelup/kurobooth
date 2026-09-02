@@ -331,7 +331,9 @@ export default function BoothPage({ params }: Props) {
             <div className={styles.previewPanel}>
               <div className={styles.previewLabel}>
                 <span>Live Preview Strip</span>
-                <span className={styles.previewSize}>2 × 6 inch</span>
+                <span className={styles.previewSize}>
+                  {template.printSize === '4x6' || (template.stripWidth && template.stripHeight && (template.stripWidth / template.stripHeight > 0.5)) ? '4 × 6 inch' : '2 × 6 inch'}
+                </span>
               </div>
               <div className={styles.previewWrapper}>
                 <TemplatePreview

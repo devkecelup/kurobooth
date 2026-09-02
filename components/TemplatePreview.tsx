@@ -275,9 +275,6 @@ export default function TemplatePreview({
     <div
       ref={containerRef}
       className={styles.previewContainer}
-      style={{
-        background: template.backgroundColor || '#FFFFFF',
-      }}
     >
       <div
         className={styles.canvasWrapper}
