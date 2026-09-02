@@ -15,7 +15,7 @@ function isSupabaseConfigured(): boolean {
 }
 
 // In-memory sessions store fallback for local / non-database mode
-const localSessions = new Map<string, any>()
+const localSessions = new Map<string, Record<string, unknown>>()
 
 export async function POST(request: NextRequest) {
   try {

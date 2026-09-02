@@ -20,27 +20,63 @@ import {
   SearchIcon,
   CameraIcon,
   QrCodeIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
 } from '@/components/Icons'
 import Mascot from '@/components/Mascot'
 import TemplatePreview from '@/components/TemplatePreview'
+import FloatingMascotAssistant from '@/components/FloatingMascotAssistant'
 import { TemplateConfig } from '@/lib/templates'
 import { getShareUrl } from '@/lib/utils'
 import styles from './page.module.css'
 
-const PRESET_4_VERTICAL = [
+/** Convert any image dataURL (JPG/PNG/etc) to WebP dataURL */
+async function convertToWebP(dataUrl: string, quality: number = 0.92): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = img.naturalWidth
+      canvas.height = img.naturalHeight
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { resolve(dataUrl); return }
+      ctx.drawImage(img, 0, 0)
+      resolve(canvas.toDataURL('image/webp', quality))
+    }
+    img.onerror = () => resolve(dataUrl)
+    img.src = dataUrl
+  })
+}
+
+/** Convert a dataURL to a Blob */
+function dataUrlToWebPBlob(dataUrl: string): Blob {
+  const [header, base64] = dataUrl.split(',')
+  const mime = header.match(/:(.*?);/)?.[1] ?? 'image/webp'
+  const binary = atob(base64)
+  const arr = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i)
+  return new Blob([arr], { type: mime })
+}
+
+const PRESET_4_VERTICAL: SlotDef[] = [
   { x: 40, y: 60, width: 520, height: 360, borderRadius: 8 },
   { x: 40, y: 450, width: 520, height: 360, borderRadius: 8 },
   { x: 40, y: 840, width: 520, height: 360, borderRadius: 8 },
   { x: 40, y: 1230, width: 520, height: 360, borderRadius: 8 },
 ]
 
-const PRESET_3_VERTICAL = [
+const PRESET_2_VERTICAL: SlotDef[] = [
+  { x: 40, y: 80, width: 520, height: 680, borderRadius: 14 },
+  { x: 40, y: 820, width: 520, height: 680, borderRadius: 14 },
+]
+
+const PRESET_3_VERTICAL: SlotDef[] = [
   { x: 40, y: 70, width: 520, height: 450, borderRadius: 12 },
   { x: 40, y: 560, width: 520, height: 450, borderRadius: 12 },
   { x: 40, y: 1050, width: 520, height: 450, borderRadius: 12 },
 ]
 
-const PRESET_6_GRID = [
+const PRESET_6_GRID: SlotDef[] = [
   { x: 40, y: 80, width: 245, height: 340, borderRadius: 6 },
   { x: 315, y: 80, width: 245, height: 340, borderRadius: 6 },
   { x: 40, y: 460, width: 245, height: 340, borderRadius: 6 },
@@ -67,7 +103,8 @@ function rgbToHex(r: number, g: number, b: number) {
 function rgbToHsv(r: number, g: number, b: number) {
   r /= 255; g /= 255; b /= 255;
   const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  let h = 0, s = 0, v = max;
+  let h = 0, s = 0;
+  const v = max;
   const d = max - min;
   s = max === 0 ? 0 : d / max;
   if (max === min) {
@@ -105,9 +142,9 @@ function cleanIsolatedSpecks(imgData: ImageData, maxSpeckSize: number = 1000) {
         while (qHead < queue.length) {
           const curr = queue[qHead++];
           component.push(curr);
+          
           if (component.length > maxSpeckSize) {
             isLarge = true;
-            break;
           }
 
           const cx = curr % width;
@@ -129,8 +166,8 @@ function cleanIsolatedSpecks(imgData: ImageData, maxSpeckSize: number = 1000) {
         }
 
         if (!isLarge && !touchesBorder) {
-          for (const p of component) {
-            data[p * 4 + 3] = 0;
+          for (let i = 0; i < component.length; i++) {
+            data[component[i] * 4 + 3] = 0;
           }
         }
       }
@@ -210,14 +247,18 @@ function detectTransparentSlots(imgData: ImageData, pad: number = 15): { x: numb
   return detectedSlots
 }
 
+// Process Image Chroma Key — uses flood-fill from image border so ONLY
+// pixels connected to the chroma-colored "background" are made transparent.
+// Frame decoration that coincidentally shares the chroma color is protected
+// because it is not reachable from the image edge.
 async function applyChromaKey(
   imageSrc: string,
   chromaHex: string,
-  tolerance: number = 35,
+  tolerance: number = 20,
   smoothness: number = 5,
   slotPadding: number = 15,
-  despeckle: number = 1000
-): Promise<{ dataUrl: string, detectedSlots: any[] }> {
+  despeckle: number = 600
+): Promise<{ dataUrl: string, detectedSlots: SlotDef[] }> {
   return new Promise((resolve) => {
     const img = new Image()
     img.crossOrigin = 'anonymous'
@@ -231,36 +272,119 @@ async function applyChromaKey(
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height)
       const data = imgData.data
+      const { width, height } = imgData
 
       const target = hexToRgb(chromaHex)
       const targetHsv = rgbToHsv(target.r, target.g, target.b)
       const isTargetSaturated = targetHsv.s > 25
 
-      const tolDist = (tolerance / 100) * 441.67
-      const smoothDist = (smoothness / 100) * 100
+      const tolDist = (tolerance / 100) * 380
+      const smoothRange = (smoothness / 100) * 80
 
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i]
-        const g = data[i + 1]
-        const b = data[i + 2]
-
-        let dist = 0
+      function colorDist(r: number, g: number, b: number): number {
         if (isTargetSaturated) {
           const pixHsv = rgbToHsv(r, g, b)
           let hueDiff = Math.abs(pixHsv.h - targetHsv.h)
           if (hueDiff > 180) hueDiff = 360 - hueDiff
           const satDiff = Math.abs(pixHsv.s - targetHsv.s)
           const valDiff = Math.abs(pixHsv.v - targetHsv.v)
-          dist = (hueDiff / 180) * 320 + (satDiff / 100) * 80 + (valDiff / 100) * 60
+          return (hueDiff / 180) * 280 + (satDiff / 100) * 60 + (valDiff / 100) * 40
         } else {
-          dist = Math.sqrt((r - target.r) ** 2 + (g - target.g) ** 2 + (b - target.b) ** 2)
+          return Math.sqrt((r - target.r) ** 2 + (g - target.g) ** 2 + (b - target.b) ** 2)
         }
+      }
 
+      // Phase 1: flood-fill dari tepi — threshold ketat untuk seed
+      const inRegion = new Uint8Array(width * height)
+      const queue: number[] = []
+
+      const seedThreshold = tolDist * 0.6
+
+      function enqueueEdge(px: number) {
+        if (inRegion[px]) return
+        const i = px * 4
+        if (data[i + 3] < 200) { inRegion[px] = 2; return }
+        const dist = colorDist(data[i], data[i + 1], data[i + 2])
+        inRegion[px] = dist <= seedThreshold ? 1 : 2
+        if (inRegion[px] === 1) queue.push(px)
+      }
+
+      function enqueueNeighbor(px: number) {
+        if (inRegion[px]) return
+        const i = px * 4
+        if (data[i + 3] < 200) { inRegion[px] = 2; return }
+        const dist = colorDist(data[i], data[i + 1], data[i + 2])
+        inRegion[px] = dist <= tolDist + smoothRange ? 1 : 2
+        if (inRegion[px] === 1) queue.push(px)
+      }
+
+      for (let x = 0; x < width; x++) {
+        enqueueEdge(x)
+        enqueueEdge((height - 1) * width + x)
+      }
+      for (let y = 1; y < height - 1; y++) {
+        enqueueEdge(y * width)
+        enqueueEdge(y * width + width - 1)
+      }
+
+      let head = 0
+      while (head < queue.length) {
+        const px = queue[head++]
+        const cx = px % width
+        const cy = Math.floor(px / width)
+        const neighbors = [
+          cy > 0          ? px - width    : -1,
+          cy < height - 1 ? px + width    : -1,
+          cx > 0          ? px - 1        : -1,
+          cx < width - 1  ? px + 1        : -1,
+        ]
+        for (const n of neighbors) { if (n >= 0) enqueueNeighbor(n) }
+      }
+
+
+      // Phase 2: interior enclosed chroma pockets (photo slots)
+      for (let y = 2; y < height - 2; y++) {
+        for (let x = 2; x < width - 2; x++) {
+          const px = y * width + x
+          if (inRegion[px]) continue
+          const i = px * 4
+          if (colorDist(data[i], data[i + 1], data[i + 2]) > tolDist) continue
+          const pocketQueue = [px]
+          inRegion[px] = 1
+          let pHead = 0
+          while (pHead < pocketQueue.length) {
+            const ppx = pocketQueue[pHead++]
+            const pcx = ppx % width
+            const pcy = Math.floor(ppx / width)
+            const pn = [
+              pcy > 0          ? ppx - width    : -1,
+              pcy < height - 1 ? ppx + width    : -1,
+              pcx > 0          ? ppx - 1        : -1,
+              pcx < width - 1  ? ppx + 1        : -1,
+            ]
+            for (const n of pn) {
+              if (n >= 0 && !inRegion[n]) {
+                const ni = n * 4
+                if (colorDist(data[ni], data[ni + 1], data[ni + 2]) <= tolDist + smoothRange) {
+                  inRegion[n] = 1
+                  pocketQueue.push(n)
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Phase 3: apply transparency
+      for (let px = 0; px < width * height; px++) {
+        if (inRegion[px] !== 1) continue
+        const i = px * 4
+        const dist = colorDist(data[i], data[i + 1], data[i + 2])
         if (dist <= tolDist) {
           data[i + 3] = 0
-        } else if (smoothDist > 0 && dist < tolDist + smoothDist) {
-          const ratio = (dist - tolDist) / smoothDist
-          data[i + 3] = Math.min(data[i + 3], Math.round(255 * ratio))
+        } else if (smoothRange > 0 && dist < tolDist + smoothRange) {
+          const ratio = (dist - tolDist) / smoothRange
+          data[i + 3] = Math.min(data[i + 3], Math.round(255 * ratio * ratio))
         }
       }
 
@@ -280,6 +404,22 @@ async function applyChromaKey(
   })
 }
 
+interface AdminSession {
+  id?: string
+  share_code?: string
+  template_id?: string
+  image_url?: string
+  created_at?: string
+}
+
+interface SlotDef {
+  x: number
+  y: number
+  width: number
+  height: number
+  borderRadius?: number
+}
+
 export default function AdminPage() {
   const router = useRouter()
   const [secret, setSecret] = useState('')
@@ -289,17 +429,32 @@ export default function AdminPage() {
 
   // Data State
   const [templates, setTemplates] = useState<TemplateConfig[]>([])
-  const [sessions, setSessions] = useState<any[]>([])
+  const [sessions, setSessions] = useState<AdminSession[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isSessionsLoading, setIsSessionsLoading] = useState(false)
 
   // Template Search & Filter State
-  const [templateFilter, setTemplateFilter] = useState<'all' | 'active' | 'pending'>('all')
+  const [templateFilter, setTemplateFilter] = useState<'all' | 'active' | 'pending' | 'default' | 'community'>('all')
   const [templateSearch, setTemplateSearch] = useState('')
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null)
 
   // Session Search State
   const [sessionSearch, setSessionSearch] = useState('')
   const [previewLightboxImg, setPreviewLightboxImg] = useState<string | null>(null)
+
+  // Pagination State for Templates & Sessions
+  const [templatePage, setTemplatePage] = useState(1)
+  const TEMPLATES_PER_PAGE = 8
+  const [sessionPage, setSessionPage] = useState(1)
+  const SESSIONS_PER_PAGE = 9
+
+  useEffect(() => {
+    setTemplatePage(1)
+  }, [templateFilter, templateSearch])
+
+  useEffect(() => {
+    setSessionPage(1)
+  }, [sessionSearch])
 
   // Actions Loading State
   const [deleteId, setDeleteId] = useState<string | null>(null)
@@ -308,16 +463,16 @@ export default function AdminPage() {
   // Form State for Canva Template Creation
   const [formName, setFormName] = useState('')
   const [formDesc, setFormDesc] = useState('')
-  const [formPreset, setFormPreset] = useState<'4-vert' | '3-vert' | '6-grid'>('4-vert')
-  const [formSlots, setFormSlots] = useState<any[]>(PRESET_4_VERTICAL)
+  const [formPreset, setFormPreset] = useState<'2-vert' | '3-vert' | '4-vert' | '6-grid'>('4-vert')
+  const [formSlots, setFormSlots] = useState<SlotDef[]>(PRESET_4_VERTICAL)
   const [formBgColor, setFormBgColor] = useState('#FFFFFF')
   const [formAccentColor, setFormAccentColor] = useState('#0D3B24')
   const [formTags, setFormTags] = useState('canva, strip')
   const [rawImageSrc, setRawImageSrc] = useState('')
   const [processedFrameUrl, setProcessedFrameUrl] = useState('')
   const [chromaColor, setChromaColor] = useState('#00FF00')
-  const [chromaTolerance, setChromaTolerance] = useState(35)
-  const [chromaSmoothness, setChromaSmoothness] = useState(5)
+  const [chromaTolerance, setChromaTolerance] = useState(20)
+  const [chromaSmoothness] = useState(5)
   const [slotPadding, setSlotPadding] = useState(15)
   const [detectedSlotCount, setDetectedSlotCount] = useState(0)
   const [isProcessingChroma, setIsProcessingChroma] = useState(false)
@@ -338,7 +493,7 @@ export default function AdminPage() {
       setProcessedFrameUrl(result.dataUrl)
       if (result.detectedSlots && result.detectedSlots.length > 0) {
         setFormSlots(result.detectedSlots)
-        setDetectedSlotCount(result.detectedSlots.length)
+        // Note: Admin page might not have a generic 'preset' UI button state, it uses formSlots directly.
       }
     } finally {
       setIsProcessingChroma(false)
@@ -375,32 +530,57 @@ export default function AdminPage() {
     }
   }, [])
 
-  // Auto-restore admin session from sessionStorage
+  // Auto-restore admin session from sessionStorage, but verify against server first
   useEffect(() => {
-    try {
-      const savedSecret = sessionStorage.getItem('kurobooth_admin_secret')
-      if (savedSecret) {
+    const timer = setTimeout(async () => {
+      try {
+        const savedSecret = sessionStorage.getItem('kurobooth_admin_secret')
+        if (!savedSecret) return
+        // Re-verify — session storage bisa jadi stale kalau password sudah ganti
+        const verifyRes = await fetch('/api/admin/sessions?secret=' + encodeURIComponent(savedSecret))
+        if (!verifyRes.ok) {
+          // Password sudah tidak valid — hapus dari storage
+          sessionStorage.removeItem('kurobooth_admin_secret')
+          return
+        }
         setSecret(savedSecret)
         setIsLoggedIn(true)
+        const data = await verifyRes.json()
+        setSessions(data.sessions ?? [])
         loadTemplates(savedSecret)
-        loadSessions(savedSecret)
-      }
-    } catch {}
-  }, [loadTemplates, loadSessions])
+      } catch {}
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [loadTemplates])
 
-  function handleLogin(e: React.FormEvent) {
+  async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     if (!secret.trim()) {
       setLoginError('Silakan masukkan kata sandi admin.')
       return
     }
-    setIsLoggedIn(true)
     setLoginError('')
+    setIsLoading(true)
     try {
-      sessionStorage.setItem('kurobooth_admin_secret', secret)
-    } catch {}
-    loadTemplates(secret)
-    loadSessions(secret)
+      // Verifikasi ke server dulu — jika secret salah, server akan return 401/403
+      const verifyRes = await fetch('/api/admin/sessions?secret=' + encodeURIComponent(secret))
+      if (!verifyRes.ok) {
+        setLoginError('Kata sandi salah. Akses ditolak.')
+        return
+      }
+      // Password benar → izinkan masuk
+      setIsLoggedIn(true)
+      try {
+        sessionStorage.setItem('kurobooth_admin_secret', secret)
+      } catch {}
+      const data = await verifyRes.json()
+      setSessions(data.sessions ?? [])
+      loadTemplates(secret)
+    } catch {
+      setLoginError('Gagal terhubung ke server. Coba lagi.')
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   function handleLogout() {
@@ -422,6 +602,10 @@ export default function AdminPage() {
         setTemplates(prev => prev.map(t => t.id === id ? { ...t, isActive: true } : t))
         setActionSuccessMsg('Template berhasil disetujui dan diterbitkan ke galeri publik!')
         setTimeout(() => setActionSuccessMsg(null), 3500)
+        loadTemplates(secret)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('kurobooth:templates-updated'))
+        }
       }
     } catch (e) {
       console.error('Approve error:', e)
@@ -445,6 +629,10 @@ export default function AdminPage() {
         setTemplates(prev => prev.filter(t => t.id !== id))
         setActionSuccessMsg(isReject ? 'Template berhasil ditolak dan dihapus.' : 'Template berhasil dihapus.')
         setTimeout(() => setActionSuccessMsg(null), 3500)
+        loadTemplates(secret)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('kurobooth:templates-updated'))
+        }
       }
     } catch (e) {
       console.error('Delete template error:', e)
@@ -479,7 +667,37 @@ export default function AdminPage() {
       if (event.target?.result) {
         const base64 = event.target.result as string
         setRawImageSrc(base64)
-        reprocessChroma(base64, chromaColor, chromaTolerance, chromaSmoothness, slotPadding)
+        setProcessedFrameUrl('')
+        
+        // Auto-detect transparency
+        const img = new Image()
+        img.onload = () => {
+          const c = document.createElement('canvas')
+          c.width = img.naturalWidth
+          c.height = img.naturalHeight
+          const cx = c.getContext('2d')
+          if (!cx) return
+          cx.drawImage(img, 0, 0)
+          const { data } = cx.getImageData(0, 0, c.width, c.height)
+          let transparentCount = 0
+          for (let i = 3; i < data.length; i += 4) {
+            if (data[i] < 200) transparentCount++
+          }
+          const transparentRatio = transparentCount / (c.width * c.height)
+          if (transparentRatio > 0.05) {
+            // Gambar sudah transparan — bypass chroma
+            setProcessedFrameUrl(base64)
+            // Lakukan deteksi slot
+            const imgData = cx.getImageData(0, 0, c.width, c.height)
+            const detected = detectTransparentSlots(imgData, slotPadding)
+            if (detected && detected.length > 0) {
+              setFormSlots(detected)
+            }
+          } else {
+            reprocessChroma(base64, chromaColor, chromaTolerance, chromaSmoothness, slotPadding)
+          }
+        }
+        img.src = base64
       }
     }
     reader.readAsDataURL(file)
@@ -488,7 +706,7 @@ export default function AdminPage() {
   async function handleEyeDropper() {
     if (typeof window !== 'undefined' && 'EyeDropper' in window) {
       try {
-        const eyeDropper = new (window as any).EyeDropper()
+        const eyeDropper = new (window as { EyeDropper: new() => { open: () => Promise<{ sRGBHex: string }> } }).EyeDropper()
         const result = await eyeDropper.open()
         if (result?.sRGBHex) {
           const color = result.sRGBHex.toUpperCase()
@@ -534,11 +752,13 @@ export default function AdminPage() {
       let finalFrameUrl = processedFrameUrl || rawImageSrc
       if (finalFrameUrl && finalFrameUrl.startsWith('data:')) {
         try {
-          const { dataURLToBlob, generateShareCode } = await import('@/lib/utils')
-          const blob = dataURLToBlob(finalFrameUrl)
+          const { generateShareCode } = await import('@/lib/utils')
+          // Convert JPG/PNG frame to WebP for faster loading
+          const webpDataUrl = await convertToWebP(finalFrameUrl, 0.92)
           const frameCode = 'frame-admin-' + generateShareCode()
+          const webpBlob = dataUrlToWebPBlob(webpDataUrl)
           const formData = new FormData()
-          formData.append('file', blob, frameCode + '.png')
+          formData.append('file', webpBlob, frameCode + '.webp')
           formData.append('shareCode', frameCode)
           const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData })
           if (uploadRes.ok) {
@@ -551,8 +771,9 @@ export default function AdminPage() {
       }
 
       const payload = {
+        id: editingTemplateId || undefined,
         name: formName,
-        description: formDesc,
+        description: formDesc.trim() || 'Template kustom dari Canva',
         photoCount: formSlots.length,
         stripWidth: 600,
         stripHeight: 1800,
@@ -577,13 +798,17 @@ export default function AdminPage() {
 
       const data = await res.json()
       if (res.ok) {
-        setActionSuccessMsg('Template Canva berhasil disimpan dan langsung aktif!')
+        setActionSuccessMsg(editingTemplateId ? `Template "${formName}" berhasil diperbarui!` : 'Template Canva berhasil disimpan dan langsung aktif!')
         setTimeout(() => setActionSuccessMsg(null), 3500)
+        setEditingTemplateId(null)
         setFormName('')
         setFormDesc('')
         setRawImageSrc('')
         setProcessedFrameUrl('')
         loadTemplates(secret)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('kurobooth:templates-updated'))
+        }
         setActiveTab('templates')
       } else {
         setFormError(data.error || 'Gagal menyimpan template.')
@@ -595,12 +820,56 @@ export default function AdminPage() {
     }
   }
 
+  // Edit an existing template in the editor
+  function handleStartEdit(t: TemplateConfig) {
+    setEditingTemplateId(t.id)
+    setFormName(t.name)
+    setFormDesc(t.description || '')
+    setFormBgColor(t.backgroundColor || '#FFFFFF')
+    setFormAccentColor(t.accentColor || '#0D3B24')
+    setFormTags((t.tags || []).join(', '))
+    setFormSlots(t.slots || PRESET_4_VERTICAL)
+    setRawImageSrc(t.frameImageUrl || '')
+    setProcessedFrameUrl(t.frameImageUrl || '')
+    setFormPreset(t.slots.length === 2 ? '2-vert' : t.slots.length === 3 ? '3-vert' : t.slots.length === 6 ? '6-grid' : '4-vert')
+    setFormError('')
+    setActiveTab('upload')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  function handleCancelEdit() {
+    setEditingTemplateId(null)
+    setFormName('')
+    setFormDesc('')
+    setFormBgColor('#FFFFFF')
+    setFormAccentColor('#0D3B24')
+    setFormTags('canva, strip')
+    setFormSlots(PRESET_4_VERTICAL)
+    setRawImageSrc('')
+    setProcessedFrameUrl('')
+    setFormPreset('4-vert')
+    setFormError('')
+  }
+
+  // Helper to distinguish built-in vs community uploaded templates
+  const isDefaultTemplate = (id: string) => (
+    id.startsWith('kuro-') || id.startsWith('korean-') || id.startsWith('vintage-') || 
+    id.startsWith('cherry-') || id.startsWith('minimalist-') || id.startsWith('tokyo-') || 
+    id.startsWith('aesthetic-') || id.startsWith('polaroid-') || id.startsWith('emerald-') || 
+    id.startsWith('y2k-') || id.startsWith('tb-')
+  )
+
   // Filtered Templates
   const activeTemplates = templates.filter(t => t.isActive !== false)
   const pendingTemplates = templates.filter(t => t.isActive === false)
+  const defaultTemplates = templates.filter(t => isDefaultTemplate(t.id))
+  const communityTemplates = templates.filter(t => !isDefaultTemplate(t.id))
+
   const displayedTemplates = templates.filter(t => {
     if (templateFilter === 'active' && t.isActive === false) return false
     if (templateFilter === 'pending' && t.isActive !== false) return false
+    if (templateFilter === 'default' && !isDefaultTemplate(t.id)) return false
+    if (templateFilter === 'community' && isDefaultTemplate(t.id)) return false
     if (templateSearch.trim()) {
       const q = templateSearch.toLowerCase()
       return (
@@ -615,13 +884,19 @@ export default function AdminPage() {
   // Filtered Sessions by Share Code or ID
   const displayedSessions = sessions.filter(s => {
     if (!sessionSearch.trim()) return true
-    const q = sessionSearch.toLowerCase()
-    return (
-      (s.share_code && s.share_code.toLowerCase().includes(q)) ||
-      (s.id && s.id.toLowerCase().includes(q)) ||
-      (s.template_id && s.template_id.toLowerCase().includes(q))
-    )
+    const q = sessionSearch.toLowerCase().trim()
+    const code = (s.share_code || '').toLowerCase()
+    const id = (s.id || '').toLowerCase()
+    const tId = (s.template_id || '').toLowerCase()
+    return code.includes(q) || id.includes(q) || tId.includes(q)
   })
+
+  // Pagination Calculations
+  const totalTemplatePages = Math.ceil(displayedTemplates.length / TEMPLATES_PER_PAGE) || 1
+  const paginatedTemplates = displayedTemplates.slice((templatePage - 1) * TEMPLATES_PER_PAGE, templatePage * TEMPLATES_PER_PAGE)
+
+  const totalSessionPages = Math.ceil(displayedSessions.length / SESSIONS_PER_PAGE) || 1
+  const paginatedSessions = displayedSessions.slice((sessionPage - 1) * SESSIONS_PER_PAGE, sessionPage * SESSIONS_PER_PAGE)
 
   if (!isLoggedIn) {
     return (
@@ -651,8 +926,15 @@ export default function AdminPage() {
                 <span>{loginError}</span>
               </div>
             )}
-            <button id="btn-login" type="submit" className="btn btn-primary w-full">
-              <span>Masuk Dashboard</span>
+            <button id="btn-login" type="submit" className="btn btn-primary w-full" disabled={isLoading}>
+              {isLoading ? (
+                <>
+                  <div style={{ width: 16, height: 16, border: '2.5px solid rgba(255,255,255,0.35)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.7s linear infinite', flexShrink: 0 }} />
+                  <span>Memverifikasi...</span>
+                </>
+              ) : (
+                <span>Masuk Dashboard</span>
+              )}
             </button>
           </form>
 
@@ -809,32 +1091,128 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* Pending Template Review Notice */}
-            {pendingTemplates.length > 0 && (
-              <div style={{ background: '#FFFBEB', border: '1.5px solid #FCD34D', borderRadius: '16px', padding: '20px', marginBottom: '28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                  <Mascot pose="sparkle" size={48} animated={false} />
-                  <div>
-                    <h3 style={{ fontSize: '1rem', fontWeight: 800, color: '#92400E' }}>Ada {pendingTemplates.length} Template Sumbangan Menunggu Kurasi!</h3>
-                    <p style={{ fontSize: '0.8125rem', color: '#B45309', marginTop: '2px' }}>Tinjau dan setujui karya kreator agar langsung tampil di galeri publik.</p>
-                  </div>
-                </div>
-                <button className="btn btn-primary" onClick={() => { setActiveTab('templates'); setTemplateFilter('pending') }}>
-                  <span>Tinjau Sekarang</span>
-                </button>
-              </div>
-            )}
-
             {/* Quick Actions Bar */}
-            <div style={{ display: 'flex', gap: '12px' }}>
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '32px', flexWrap: 'wrap' }}>
               <button className="btn btn-primary" onClick={() => setActiveTab('upload')}>
                 <PlusIcon size={16} />
                 <span>+ Upload Template Canva Baru</span>
               </button>
+              <button className="btn btn-secondary" onClick={() => setActiveTab('templates')}>
+                <PaletteIcon size={16} />
+                <span>Kelola Semua Template ({templates.length})</span>
+              </button>
               <button className="btn btn-secondary" onClick={() => setActiveTab('sessions')}>
                 <SearchIcon size={16} />
-                <span>Cari Riwayat Foto Sesi</span>
+                <span>Cari Riwayat Foto Sesi ({sessions.length})</span>
               </button>
+            </div>
+
+            {/* PENDING REVIEW DIRECT QUEUE */}
+            <div style={{ marginBottom: '32px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <h2 style={{ fontSize: '1.125rem', fontWeight: 800, color: '#0D3B24' }}>
+                    Antrean Template Menunggu Persetujuan ({pendingTemplates.length})
+                  </h2>
+                  {pendingTemplates.length > 0 && (
+                    <span style={{ fontSize: '0.6875rem', fontWeight: 800, background: '#FEF3C7', color: '#B45309', padding: '2px 8px', borderRadius: '999px', border: '1px solid #FCD34D' }}>
+                      🟡 Perlu Tindakan
+                    </span>
+                  )}
+                </div>
+                {pendingTemplates.length > 0 && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => { setActiveTab('templates'); setTemplateFilter('pending') }}
+                    style={{ fontSize: '0.8125rem', color: 'var(--accent-1)' }}
+                  >
+                    <span>Buka Filter di Tab Template &rarr;</span>
+                  </button>
+                )}
+              </div>
+
+              {pendingTemplates.length === 0 ? (
+                <div style={{
+                  background: '#FFFFFF',
+                  border: '1.5px solid var(--border)',
+                  borderRadius: '16px',
+                  padding: '32px 20px',
+                  textAlign: 'center',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <Mascot pose="happy" size={44} animated={false} />
+                  <p style={{ fontWeight: 700, color: '#0D3B24', fontSize: '0.9375rem' }}>
+                    Semua Bersih! Tidak Ada Template Pending ✨
+                  </p>
+                  <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', maxWidth: '420px', margin: 0 }}>
+                    Semua template sumbangan komunitas sudah disetujui atau belum ada kiriman baru.
+                  </p>
+                </div>
+              ) : (
+                <div className={styles.templateGridList}>
+                  {pendingTemplates.map(t => (
+                    <div
+                      key={t.id}
+                      className={styles.templateCard}
+                      style={{ border: '2px solid #F59E0B', background: '#FFFDF7' }}
+                    >
+                      <div className={styles.cardPreviewWrap}>
+                        <TemplatePreview template={t} />
+                      </div>
+                      <div className={styles.cardInfo}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                          <div className={styles.cardName}>{t.name}</div>
+                          <span style={{ fontSize: '0.6875rem', fontWeight: 800, background: '#FEF3C7', color: '#B45309', padding: '2px 8px', borderRadius: '999px', border: '1px solid #FCD34D' }}>
+                            🟡 Pending
+                          </span>
+                        </div>
+                        <div className={styles.cardMeta}>
+                          <span className={styles.cardMetaBadge}>{t.photoCount} foto</span>
+                          <span>·</span>
+                          <span>{t.printSize}</span>
+                        </div>
+                        {t.description && <div className={styles.cardDesc}>{t.description}</div>}
+                        <div className={styles.cardTags}>
+                          {t.tags?.slice(0, 3).map(tag => (
+                            <span key={tag} className={styles.cardTag}>#{tag}</span>
+                          ))}
+                        </div>
+
+                        <div className={styles.cardActions}>
+                          <button
+                            className="btn btn-primary btn-sm"
+                            onClick={() => handleApprove(t.id)}
+                            style={{ flex: 1, background: '#10B981', borderColor: '#059669' }}
+                          >
+                            <CheckCircleIcon size={14} />
+                            <span>Setujui</span>
+                          </button>
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => handleStartEdit(t)}
+                            title="Edit template sebelum disetujui"
+                          >
+                            <PaletteIcon size={14} />
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            className={styles.deleteBtn}
+                            onClick={() => handleDelete(t.id, true)}
+                            disabled={deleteId === t.id}
+                            title="Tolak dan Hapus Template"
+                          >
+                            <CloseIcon size={14} />
+                            <span>{deleteId === t.id ? '...' : 'Tolak'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </section>
         )}
@@ -872,7 +1250,19 @@ export default function AdminPage() {
                   className={`${styles.subTabBtn} ${templateFilter === 'pending' ? styles.subTabBtnActive : ''}`}
                   onClick={() => setTemplateFilter('pending')}
                 >
-                  Menunggu Persetujuan ({pendingTemplates.length})
+                  Pending ({pendingTemplates.length})
+                </button>
+                <button
+                  className={`${styles.subTabBtn} ${templateFilter === 'default' ? styles.subTabBtnActive : ''}`}
+                  onClick={() => setTemplateFilter('default')}
+                >
+                  Bawaan / Default ({defaultTemplates.length})
+                </button>
+                <button
+                  className={`${styles.subTabBtn} ${templateFilter === 'community' ? styles.subTabBtnActive : ''}`}
+                  onClick={() => setTemplateFilter('community')}
+                >
+                  Komunitas ({communityTemplates.length})
                 </button>
               </div>
 
@@ -904,83 +1294,154 @@ export default function AdminPage() {
                 <p style={{ marginTop: 12, fontWeight: 600 }}>Tidak ada template yang cocok dengan filter atau pencarian Anda.</p>
               </div>
             ) : (
-              <div className={styles.templateGridList}>
-                {displayedTemplates.map(t => (
-                  <div
-                    key={t.id}
-                    className={styles.templateCard}
-                    style={t.isActive === false ? { border: '2px solid #F59E0B', background: '#FFFDF7' } : undefined}
-                  >
-                    <div className={styles.cardPreviewWrap}>
-                      <TemplatePreview template={t} />
+              <>
+                <div className={styles.templateGridList}>
+                  {paginatedTemplates.map(t => (
+                    <div
+                      key={t.id}
+                      className={styles.templateCard}
+                      style={t.isActive === false ? { border: '2px solid #F59E0B', background: '#FFFDF7' } : undefined}
+                    >
+                      <div className={styles.cardPreviewWrap}>
+                        <TemplatePreview template={t} />
+                      </div>
+                      <div className={styles.cardInfo}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                          <div className={styles.cardName}>{t.name}</div>
+                          {t.isActive === false ? (
+                            <span style={{ fontSize: '0.6875rem', fontWeight: 800, background: '#FEF3C7', color: '#B45309', padding: '2px 8px', borderRadius: '999px', border: '1px solid #FCD34D' }}>
+                              🟡 Pending
+                            </span>
+                          ) : isDefaultTemplate(t.id) ? (
+                            <span style={{ fontSize: '0.6875rem', fontWeight: 700, background: '#E0F2FE', color: '#0369A1', padding: '2px 8px', borderRadius: '999px', border: '1px solid #BAE6FD' }}>
+                              🌟 Default
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: '0.6875rem', fontWeight: 700, background: '#E4F2E8', color: '#0D3B24', padding: '2px 8px', borderRadius: '999px', border: '1px solid #B8DCBF' }}>
+                              🎨 Komunitas
+                            </span>
+                          )}
+                        </div>
+                        <div className={styles.cardMeta}>
+                          <span className={styles.cardMetaBadge}>{t.photoCount} foto</span>
+                          <span>·</span>
+                          <span>{t.printSize}</span>
+                        </div>
+                        {t.description && <div className={styles.cardDesc}>{t.description}</div>}
+                        <div className={styles.cardTags}>
+                          {t.tags?.slice(0, 3).map(tag => (
+                            <span key={tag} className={styles.cardTag}>#{tag}</span>
+                          ))}
+                        </div>
+
+                        <div className={styles.cardActions}>
+                          {t.isActive === false ? (
+                            <>
+                              <button
+                                className="btn btn-primary btn-sm"
+                                onClick={() => handleApprove(t.id)}
+                                style={{ flex: 1, background: '#10B981', borderColor: '#059669' }}
+                              >
+                                <CheckCircleIcon size={14} />
+                                <span>Setujui</span>
+                              </button>
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => handleStartEdit(t)}
+                                title="Edit template sebelum disetujui"
+                              >
+                                <PaletteIcon size={14} />
+                                <span>Edit</span>
+                              </button>
+                              <button
+                                className={styles.deleteBtn}
+                                onClick={() => handleDelete(t.id, true)}
+                                disabled={deleteId === t.id}
+                                title="Tolak dan Hapus Template"
+                              >
+                                <CloseIcon size={14} />
+                                <span>{deleteId === t.id ? '...' : 'Tolak'}</span>
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => handleStartEdit(t)}
+                                style={{ flex: 1 }}
+                                title="Edit template ini"
+                              >
+                                <PaletteIcon size={14} />
+                                <span>Edit</span>
+                              </button>
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => window.open('/booth/' + t.id, '_blank')}
+                              >
+                                <ExternalLinkIcon size={14} />
+                                <span>Buka</span>
+                              </button>
+                              <button
+                                className={styles.deleteBtn}
+                                onClick={() => handleDelete(t.id)}
+                                disabled={deleteId === t.id}
+                                title="Hapus template"
+                              >
+                                <TrashIcon size={14} />
+                                <span>{deleteId === t.id ? '...' : 'Hapus'}</span>
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div className={styles.cardInfo}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                        <div className={styles.cardName}>{t.name}</div>
-                        {t.isActive === false && (
-                          <span style={{ fontSize: '0.6875rem', fontWeight: 800, background: '#FEF3C7', color: '#B45309', padding: '2px 8px', borderRadius: '999px', border: '1px solid #FCD34D' }}>
-                            🟡 Pending Review
-                          </span>
-                        )}
-                      </div>
-                      <div className={styles.cardMeta}>
-                        <span className={styles.cardMetaBadge}>{t.photoCount} foto</span>
-                        <span>·</span>
-                        <span>{t.printSize}</span>
-                      </div>
-                      {t.description && <div className={styles.cardDesc}>{t.description}</div>}
-                      <div className={styles.cardTags}>
-                        {t.tags?.slice(0, 3).map(tag => (
-                          <span key={tag} className={styles.cardTag}>#{tag}</span>
+                  ))}
+                </div>
+
+                {/* Pagination Controls for Templates */}
+                {displayedTemplates.length > TEMPLATES_PER_PAGE && (
+                  <div className={styles.paginationWrap}>
+                    <div className={styles.paginationControls}>
+                      <button
+                        type="button"
+                        className={styles.paginationNavBtn}
+                        onClick={() => { setTemplatePage(p => Math.max(1, p - 1)); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+                        disabled={templatePage === 1}
+                      >
+                        <ChevronLeftIcon size={16} />
+                        <span>Sebelumnya</span>
+                      </button>
+
+                      <div className={styles.pageNumbers}>
+                        {Array.from({ length: totalTemplatePages }, (_, idx) => idx + 1).map(page => (
+                          <button
+                            key={page}
+                            type="button"
+                            className={`${styles.pageNumberBtn} ${templatePage === page ? styles.pageNumberBtnActive : ''}`}
+                            onClick={() => { setTemplatePage(page); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+                          >
+                            {page}
+                          </button>
                         ))}
                       </div>
 
-                      <div className={styles.cardActions}>
-                        {t.isActive === false ? (
-                          <>
-                            <button
-                              className="btn btn-primary btn-sm"
-                              onClick={() => handleApprove(t.id)}
-                              style={{ flex: 1, background: '#10B981', borderColor: '#059669' }}
-                            >
-                              <CheckCircleIcon size={14} />
-                              <span>Setujui</span>
-                            </button>
-                            <button
-                              className={styles.deleteBtn}
-                              onClick={() => handleDelete(t.id, true)}
-                              disabled={deleteId === t.id}
-                              title="Tolak dan Hapus Template"
-                            >
-                              <CloseIcon size={14} />
-                              <span>{deleteId === t.id ? '...' : 'Tolak'}</span>
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => window.open('/booth/' + t.id, '_blank')}
-                            >
-                              <ExternalLinkIcon size={14} />
-                              <span>Buka Booth</span>
-                            </button>
-                            <button
-                              className={styles.deleteBtn}
-                              onClick={() => handleDelete(t.id)}
-                              disabled={deleteId === t.id}
-                              title="Hapus template"
-                            >
-                              <TrashIcon size={14} />
-                              <span>{deleteId === t.id ? '...' : 'Hapus'}</span>
-                            </button>
-                          </>
-                        )}
-                      </div>
+                      <button
+                        type="button"
+                        className={styles.paginationNavBtn}
+                        onClick={() => { setTemplatePage(p => Math.min(totalTemplatePages, p + 1)); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+                        disabled={templatePage === totalTemplatePages}
+                      >
+                        <span>Selanjutnya</span>
+                        <ChevronRightIcon size={16} />
+                      </button>
                     </div>
+
+                    <span className={styles.paginationInfo}>
+                      Halaman {templatePage} dari {totalTemplatePages} (Menampilkan {paginatedTemplates.length} dari {displayedTemplates.length} template)
+                    </span>
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             )}
           </section>
         )}
@@ -1031,67 +1492,105 @@ export default function AdminPage() {
                 </p>
               </div>
             ) : (
-              <div className={styles.sessionsGrid}>
-                {displayedSessions.map(s => {
-                  return (
-                    <div key={s.id || s.share_code} className={styles.sessionCard}>
-                      <div className={styles.sessionThumbWrap} onClick={() => setPreviewLightboxImg(s.image_url)} title="Klik untuk lihat ukuran penuh">
-                        <img
-                          src={s.image_url}
-                          alt={`Strip ${s.share_code}`}
-                          className={styles.sessionThumb}
-                          onError={(e) => {
-                            const target = e.currentTarget
-                            target.style.display = 'none'
-                            const parent = target.parentElement
-                            if (parent && !parent.querySelector('.img-error-badge')) {
-                              const badge = document.createElement('div')
-                              badge.className = 'img-error-badge'
-                              badge.style.cssText = 'padding: 16px; text-align: center; color: #E05252; font-size: 0.75rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; width: 100%; height: 100%;'
-                              badge.innerHTML = '<span style="font-size: 1.5rem;">⚠️</span><strong style="color: #FFFFFF;">Gambar Tidak Ditemukan</strong><span style="font-size: 0.6875rem; color: #A0AEC0;">Tersimpan sebelum Supabase Storage aktif</span>'
-                              parent.appendChild(badge)
-                            }
-                          }}
-                        />
-                      </div>
-                      <div className={styles.sessionInfo}>
-                        <div className={styles.sessionTopRow}>
-                          <span className={styles.sessionCode}>#{s.share_code}</span>
-                          <span className={styles.sessionDate}>
-                            {s.created_at ? new Date(s.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Baru saja'}
-                          </span>
+              <>
+                <div className={styles.sessionsGrid}>
+                  {paginatedSessions.map(s => {
+                    return (
+                      <div key={s.id ?? s.share_code ?? `sess-${Math.random()}`} className={styles.sessionCard}>
+                        <div className={styles.sessionThumbWrap} onClick={() => setPreviewLightboxImg(s.image_url ?? null)} title="Klik untuk lihat ukuran penuh">
+                          {s.image_url ? (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img src={s.image_url} alt={s.share_code} className={styles.sessionThumb} loading="lazy" />
+                          ) : (
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                              Tidak ada preview
+                            </div>
+                          )}
                         </div>
 
-                        <div className={styles.sessionActions}>
-                          <button
-                            className="btn btn-secondary btn-sm w-full"
-                            onClick={() => window.open(s.image_url, '_blank')}
-                          >
-                            <ExternalLinkIcon size={14} />
-                            <span>{s.image_url?.includes('supabase') ? 'Buka HD (Supabase)' : s.image_url?.includes('catbox') ? 'Buka HD (Catbox)' : 'Buka Gambar HD'}</span>
-                          </button>
-                          <div className={styles.sessionBottomRow}>
+                        <div className={styles.sessionInfo}>
+                          <div className={styles.sessionTopRow}>
+                            <span className={styles.sessionCode}>#{s.share_code}</span>
+                            <span className={styles.sessionDate}>
+                              {s.created_at ? new Date(s.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Baru saja'}
+                            </span>
+                          </div>
+
+                          <div className={styles.sessionActions}>
                             <button
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => window.open(getShareUrl(s.share_code), '_blank')}
+                              className="btn btn-secondary btn-sm w-full"
+                              onClick={() => window.open(s.image_url, '_blank')}
                             >
-                              <span>Halaman Hasil</span>
+                              <ExternalLinkIcon size={14} />
+                              <span>{s.image_url?.includes('supabase') ? 'Buka HD (Supabase)' : s.image_url?.includes('catbox') ? 'Buka HD (Catbox)' : 'Buka Gambar HD'}</span>
                             </button>
-                            <button
-                              className={styles.deleteBtn}
-                              onClick={() => handleDeleteSession(s.share_code)}
-                              title="Hapus Sesi"
-                            >
-                              <TrashIcon size={14} />
-                              <span>Hapus</span>
-                            </button>
+                            <div className={styles.sessionBottomRow}>
+                              <button
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => window.open(getShareUrl(s.share_code ?? ''), '_blank')}
+                              >
+                                <span>Halaman Hasil</span>
+                              </button>
+                              <button
+                                className={styles.deleteBtn}
+                                onClick={() => handleDeleteSession(s.share_code ?? '')}
+                                title="Hapus Sesi"
+                              >
+                                <TrashIcon size={14} />
+                                <span>Hapus</span>
+                              </button>
+                            </div>
                           </div>
                         </div>
                       </div>
+                    )
+                  })}
+                </div>
+
+                {/* Pagination Controls for Sessions */}
+                {displayedSessions.length > SESSIONS_PER_PAGE && (
+                  <div className={styles.paginationWrap}>
+                    <div className={styles.paginationControls}>
+                      <button
+                        type="button"
+                        className={styles.paginationNavBtn}
+                        onClick={() => { setSessionPage(p => Math.max(1, p - 1)); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+                        disabled={sessionPage === 1}
+                      >
+                        <ChevronLeftIcon size={16} />
+                        <span>Sebelumnya</span>
+                      </button>
+
+                      <div className={styles.pageNumbers}>
+                        {Array.from({ length: totalSessionPages }, (_, idx) => idx + 1).map(page => (
+                          <button
+                            key={page}
+                            type="button"
+                            className={`${styles.pageNumberBtn} ${sessionPage === page ? styles.pageNumberBtnActive : ''}`}
+                            onClick={() => { setSessionPage(page); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+                          >
+                            {page}
+                          </button>
+                        ))}
+                      </div>
+
+                      <button
+                        type="button"
+                        className={styles.paginationNavBtn}
+                        onClick={() => { setSessionPage(p => Math.min(totalSessionPages, p + 1)); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+                        disabled={sessionPage === totalSessionPages}
+                      >
+                        <span>Selanjutnya</span>
+                        <ChevronRightIcon size={16} />
+                      </button>
                     </div>
-                  )
-                })}
-              </div>
+
+                    <span className={styles.paginationInfo}>
+                      Halaman {sessionPage} dari {totalSessionPages} (Menampilkan {paginatedSessions.length} dari {displayedSessions.length} sesi foto)
+                    </span>
+                  </div>
+                )}
+              </>
             )}
           </section>
         )}
@@ -1101,10 +1600,50 @@ export default function AdminPage() {
           <section className={styles.uploadSection}>
             <div className={styles.topBar}>
               <div className={styles.pageHeading}>
-                <h1 className={styles.pageTitle}>Upload Template Frame Canva</h1>
-                <p className={styles.pageSubtitle}>Rancang frame dengan Chroma Key otomatis untuk menghapus warna kotak foto &amp; deteksi lubang foto presisi.</p>
+                <h1 className={styles.pageTitle}>
+                  {editingTemplateId ? 'Edit & Kustomisasi Template' : 'Upload Template Frame Canva'}
+                </h1>
+                <p className={styles.pageSubtitle}>
+                  {editingTemplateId
+                    ? `Kamu sedang mengedit template "${formName || editingTemplateId}". Sesuaikan warna, frame, atau susunan slot foto.`
+                    : 'Rancang frame dengan Chroma Key otomatis untuk menghapus warna kotak foto & deteksi lubang foto presisi.'}
+                </p>
               </div>
             </div>
+
+            {editingTemplateId && (
+              <div style={{
+                background: '#E4F2E8',
+                border: '1.5px solid #A2CFA9',
+                padding: '14px 18px',
+                borderRadius: '14px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 20,
+                gap: 12,
+                flexWrap: 'wrap',
+              }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: '1.1rem' }}>✏️</span>
+                    <strong style={{ color: '#0D3B24', fontSize: '0.9375rem' }}>Mode Edit: {formName || editingTemplateId}</strong>
+                  </div>
+                  <p style={{ margin: '3px 0 0', fontSize: '0.75rem', color: '#2D5A3D' }}>
+                    ID: <code>{editingTemplateId}</code> — Perubahan akan langsung menimpa template ini.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCancelEdit}
+                  className="btn btn-secondary btn-sm"
+                  style={{ background: '#FFFFFF', borderColor: '#A2CFA9' }}
+                >
+                  <CloseIcon size={14} />
+                  <span>Batal Edit (Buat Baru)</span>
+                </button>
+              </div>
+            )}
 
             <form onSubmit={handleSaveAdminTemplate} className={styles.formGrid}>
               <div className={styles.formCol}>
@@ -1136,10 +1675,10 @@ export default function AdminPage() {
                   <div className={styles.presetGrid}>
                     <button
                       type="button"
-                      className={`${styles.presetBtn} ${formPreset === '4-vert' ? styles.presetBtnActive : ''}`}
-                      onClick={() => { setFormPreset('4-vert'); setFormSlots(PRESET_4_VERTICAL); setDetectedSlotCount(0) }}
+                      className={`${styles.presetBtn} ${formPreset === '2-vert' ? styles.presetBtnActive : ''}`}
+                      onClick={() => { setFormPreset('2-vert'); setFormSlots(PRESET_2_VERTICAL); setDetectedSlotCount(0) }}
                     >
-                      4 Foto Vertikal
+                      2 Foto Vertikal
                     </button>
                     <button
                       type="button"
@@ -1147,6 +1686,13 @@ export default function AdminPage() {
                       onClick={() => { setFormPreset('3-vert'); setFormSlots(PRESET_3_VERTICAL); setDetectedSlotCount(0) }}
                     >
                       3 Foto Vertikal
+                    </button>
+                    <button
+                      type="button"
+                      className={`${styles.presetBtn} ${formPreset === '4-vert' ? styles.presetBtnActive : ''}`}
+                      onClick={() => { setFormPreset('4-vert'); setFormSlots(PRESET_4_VERTICAL); setDetectedSlotCount(0) }}
+                    >
+                      4 Foto Vertikal
                     </button>
                     <button
                       type="button"
@@ -1340,7 +1886,13 @@ export default function AdminPage() {
                   style={{ marginTop: '8px' }}
                 >
                   <SparklesIcon size={18} />
-                  <span>{isSavingTemplate ? 'Menyimpan ke Database...' : 'Simpan & Terbitkan Template'}</span>
+                  <span>
+                    {isSavingTemplate
+                      ? 'Menyimpan ke Database...'
+                      : editingTemplateId
+                      ? 'Simpan Perubahan Template (Update)'
+                      : 'Simpan & Terbitkan Template'}
+                  </span>
                 </button>
               </div>
 
@@ -1390,6 +1942,13 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      {/* Floating Interactive Mascot */}
+      <FloatingMascotAssistant
+        tipText="Halo Admin! Geser aku ke mana aja yaa kalau menghalangi tabel! 🛡️"
+        pose="happy"
+        title="Admin Kuro"
+      />
     </div>
   )
 }

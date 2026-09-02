@@ -9,6 +9,7 @@ import Footer from '@/components/Footer'
 import Mascot, { MascotPose } from '@/components/Mascot'
 import CreatorModal from '@/components/CreatorModal'
 import LookupModal from '@/components/LookupModal'
+import FloatingMascotAssistant from '@/components/FloatingMascotAssistant'
 import {
   PaletteIcon,
   WandIcon,
@@ -253,6 +254,13 @@ export default function DeveloperPage() {
       <LookupModal
         isOpen={isLookupOpen}
         onClose={() => setIsLookupOpen(false)}
+      />
+
+      {/* Floating Interactive Mascot */}
+      <FloatingMascotAssistant
+        tipText="Yuk kenalan sama Kurokii! Geser aku keliling profil yaa ✨"
+        pose="artist"
+        title="Halo dari Kuro!"
       />
     </div>
   )

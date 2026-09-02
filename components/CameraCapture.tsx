@@ -35,7 +35,6 @@ export default function CameraCapture({ onCapture, aspectRatio = 4 / 3 }: Props)
       stopCamera()
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {

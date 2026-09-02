@@ -3,10 +3,10 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import Mascot, { MascotPose } from '@/components/Mascot'
+import FloatingMascotAssistant from '@/components/FloatingMascotAssistant'
 import {
   CameraIcon,
   PaletteIcon,
-  QrCodeIcon,
   SparklesIcon,
   ArrowRightIcon,
 } from '@/components/Icons'
@@ -202,6 +202,13 @@ export default function NotFoundPage() {
           </div>
         </div>
       </main>
+
+      {/* Floating Interactive Mascot */}
+      <FloatingMascotAssistant
+        tipText="Tersesat? Geser aku ke tombol Beranda ya! 🧭"
+        pose="lost"
+        title="Kuro Tersesat"
+      />
     </div>
   )
 }

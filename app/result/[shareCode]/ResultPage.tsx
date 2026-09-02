@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useRef } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { use } from 'react'
 import QRCode from 'qrcode'
 import { getShareUrl } from '@/lib/utils'
@@ -10,13 +10,10 @@ import { Session } from '@/lib/supabase'
 import {
   CameraIcon,
   ArrowLeftIcon,
-  CheckCircleIcon,
   CheckIcon,
   DownloadIcon,
-  PrinterIcon,
   CopyIcon,
   PlusIcon,
-  ExternalLinkIcon,
 } from '@/components/Icons'
 import Mascot from '@/components/Mascot'
 import FloatingMascotAssistant from '@/components/FloatingMascotAssistant'
@@ -29,8 +26,6 @@ interface Props {
 export default function ResultPageInner({ params }: Props) {
   const { shareCode } = use(params)
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const previewUrl = searchParams.get('preview')
 
   const [session, setSession] = useState<Session | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
@@ -94,19 +89,61 @@ export default function ResultPageInner({ params }: Props) {
     }
   }
 
+  const [isDownloading, setIsDownloading] = useState(false)
+
   async function handleDownload() {
     if (!imageUrl) return
-    const a = document.createElement('a')
-    a.href = imageUrl
-    a.download = `photobooth-${shareCode}.png`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+    setIsDownloading(true)
+    const fileName = `kurobooth-strip-${shareCode}.png`
+    try {
+      let blobUrl: string | null = null
+
+      // 1. Prioritas: ambil dari sessionStorage (instan, offline-capable)
+      try {
+        const localImg = sessionStorage.getItem('kurobooth_result_' + shareCode)
+        if (localImg && localImg.startsWith('data:')) {
+          const res = await fetch(localImg)
+          const blob = await res.blob()
+          blobUrl = URL.createObjectURL(blob)
+        }
+      } catch { /* ignore */ }
+
+      // 2. Jika tidak ada di sessionStorage, pakai server-side proxy download
+      //    sehingga browser langsung download (bukan buka tab baru ke Supabase)
+      if (!blobUrl && imageUrl) {
+        const proxyUrl = `/api/download?url=${encodeURIComponent(imageUrl)}&name=${encodeURIComponent(fileName)}`
+        const res = await fetch(proxyUrl)
+        if (res.ok) {
+          const blob = await res.blob()
+          blobUrl = URL.createObjectURL(blob)
+        }
+      }
+
+      if (blobUrl) {
+        const a = document.createElement('a')
+        a.href = blobUrl
+        a.download = fileName
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        setTimeout(() => URL.revokeObjectURL(blobUrl!), 5000)
+      } else {
+        throw new Error('No blob available')
+      }
+    } catch {
+      // Last resort: direct href (mungkin buka di tab baru, tapi masih bisa disave)
+      const a = document.createElement('a')
+      a.href = imageUrl
+      a.download = fileName
+      a.target = '_blank'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    } finally {
+      setIsDownloading(false)
+    }
   }
 
-  function handlePrint() {
-    window.print()
-  }
 
   let template = session ? getTemplate(session.template_id) : null
   if (!template && typeof window !== 'undefined') {
@@ -188,9 +225,18 @@ export default function ResultPageInner({ params }: Props) {
 
                 <div className={`animate-fade-in delay-100 ${styles.actionButtons}`}>
                   <h3 className={styles.actionTitle}>Aksi &amp; Simpan</h3>
-                  <button id="btn-download" className={`btn btn-primary btn-lg w-full ${styles.actionBtn}`} onClick={handleDownload}>
-                    <DownloadIcon size={18} />
-                    <span>Download Foto PNG</span>
+                  <button id="btn-download" className={`btn btn-primary btn-lg w-full ${styles.actionBtn}`} onClick={handleDownload} disabled={isDownloading || !imageUrl}>
+                    {isDownloading ? (
+                      <>
+                        <div style={{ width: 18, height: 18, border: '2.5px solid rgba(255,255,255,0.4)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+                        <span>Menyiapkan File...</span>
+                      </>
+                    ) : (
+                      <>
+                        <DownloadIcon size={18} />
+                        <span>Download Foto Strip (PNG)</span>
+                      </>
+                    )}
                   </button>
                   <button id="btn-copy-link" className={`btn btn-secondary btn-lg w-full ${styles.actionBtn}`} onClick={handleCopyLink}>
                     {copied ? (

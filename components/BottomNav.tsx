@@ -1,7 +1,6 @@
 'use client'
 
 import { usePathname, useRouter } from 'next/navigation'
-import Link from 'next/link'
 import {
   PaletteIcon,
   HeartIcon,
@@ -22,8 +21,6 @@ interface Props {
 }
 
 export default function BottomNav({
-  activeCategory = 'Semua',
-  favoriteCount = 0,
   onSelectGallery,
   onSelectFavorites,
   onOpenCreator,

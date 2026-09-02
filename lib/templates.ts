@@ -67,6 +67,12 @@ const SLOTS_3 = [
   { x: PHOTO_X, y: 1050, width: PHOTO_W, height: 450, borderRadius: 12 },
 ]
 
+// 2-Slot Large Portrait Layout
+const SLOTS_2 = [
+  { x: PHOTO_X, y: 80,   width: PHOTO_W, height: 680, borderRadius: 14 },
+  { x: PHOTO_X, y: 820,  width: PHOTO_W, height: 680, borderRadius: 14 },
+]
+
 // Common SVG Paths for Vector Decorations
 const SVG_SPARKLE = 'M12 0C12 6.627 6.627 12 0 12C6.627 12 12 17.373 12 24C12 17.373 17.373 12 24 12C17.373 12 12 6.627 12 0Z'
 const SVG_FLOWER_5 = 'M12 2C13.5 6 17 6.5 17 8C17 9.5 15.5 10 14 10C16 12 16 15 14.5 16C13 17 12 15 12 13C12 15 11 17 9.5 16C8 15 8 12 10 10C8.5 10 7 9.5 7 8C7 6.5 10.5 6 12 2Z'
@@ -368,6 +374,25 @@ export const TEMPLATES: TemplateConfig[] = [
       { type: 'text', x: 300, y: 1670, text: 'sweet memories forever', fontSize: 13, fontFamily: 'serif', color: '#8B5CF6', opacity: 0.8 },
     ],
     tags: ['pastel', 'lavender', 'aesthetic', 'bunga'],
+    printSize: '2x6',
+  },
+  {
+    id: 'duo-minimalist',
+    name: 'Duo Clean Minimalist',
+    description: 'Format 2 foto vertikal besar dengan border minimalis modern',
+    photoCount: 2,
+    stripWidth: STRIP_W,
+    stripHeight: STRIP_H,
+    backgroundColor: '#FAFAF9',
+    accentColor: '#1C1917',
+    textColor: '#1C1917',
+    slots: SLOTS_2,
+    decorations: [
+      { type: 'rect', x: 180, y: 1580, width: 240, height: 1.5, color: '#1C1917', opacity: 0.8 },
+      { type: 'text', x: 300, y: 1630, text: 'DUO MOMENTS', fontSize: 18, fontFamily: 'Playfair Display, serif', color: '#1C1917', opacity: 0.95 },
+      { type: 'text', x: 300, y: 1670, text: 'two frames — endless memories', fontSize: 13, fontFamily: 'serif', color: '#78716C', opacity: 0.85 },
+    ],
+    tags: ['minimalis', 'duo', '2foto', 'clean'],
     printSize: '2x6',
   },
 ]

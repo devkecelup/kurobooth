@@ -1,19 +1,17 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { use } from 'react'
 import { TemplateConfig } from '@/lib/templates'
-import { generateShareCode, dataURLToBlob, PhotoAdjustment, drawImageAdjusted } from '@/lib/utils'
+import { generateShareCode, dataURLToBlob, PhotoAdjustment } from '@/lib/utils'
 import CameraCapture from '@/components/CameraCapture'
 import TemplatePreview from '@/components/TemplatePreview'
-import Mascot, { MascotPose } from '@/components/Mascot'
 import FloatingMascotAssistant from '@/components/FloatingMascotAssistant'
 import {
   ArrowLeftIcon,
   CameraIcon,
   UploadIcon,
-  RefreshIcon,
   SparklesIcon,
   AlertCircleIcon,
 } from '@/components/Icons'
@@ -34,7 +32,6 @@ export default function BoothPage({ params }: Props) {
   const [template, setTemplate] = useState<TemplateConfig | null | undefined>(undefined)
   const [photos, setPhotos] = useState<SlotPhoto[]>([])
   const [adjustments, setAdjustments] = useState<PhotoAdjustment[]>([])
-  const [selectedEditSlot, setSelectedEditSlot] = useState<number>(0)
   const [activeSlot, setActiveSlot] = useState<number>(0)
   const [mode, setMode] = useState<Mode>('camera')
   const [step, setStep] = useState<Step>('capture')
@@ -114,7 +111,6 @@ export default function BoothPage({ params }: Props) {
     next[index] = null
     setPhotos(next)
     setActiveSlot(index)
-    setSelectedEditSlot(index)
     setStep('capture')
   }
 
@@ -349,7 +345,6 @@ export default function BoothPage({ params }: Props) {
                     })
                   } : undefined}
                   onRetakeSlot={step === 'review' ? (idx) => handleRetake(idx) : undefined}
-                  onSelectSlot={step === 'review' ? (idx) => setSelectedEditSlot(idx) : undefined}
                 />
               </div>
             </div>

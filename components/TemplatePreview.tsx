@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { TemplateConfig } from '@/lib/templates'
 import { roundRect, drawImageAdjusted, PhotoAdjustment } from '@/lib/utils'
 import { RefreshIcon } from '@/components/Icons'
@@ -31,6 +31,12 @@ export default function TemplatePreview({
   const [isVisible, setIsVisible] = useState(priority || !!photos?.length)
   const renderedRef = useRef(false)
 
+  // Track adjustments in a ref so renderPreview never triggers a re-render when only zoom/pan changes
+  const adjustmentsRef = useRef(adjustments)
+  useEffect(() => {
+    adjustmentsRef.current = adjustments
+  }, [adjustments])
+
   const dragRef = useRef<{
     isDragging: boolean
     slotIndex: number
@@ -41,10 +47,14 @@ export default function TemplatePreview({
     zoom: number
   }>({ isDragging: false, slotIndex: -1, startX: 0, startY: 0, startOffX: 0, startOffY: 0, zoom: 1 })
 
+  // Track dragging state for overlay styling without causing full re-render
+  const [draggingSlot, setDraggingSlot] = useState(-1)
+
   // IntersectionObserver for lazy offscreen rendering
   useEffect(() => {
+    // If already visible or has photos, mark visible synchronously via useState initializer (no-op if already true)
     if (priority || photos?.length || isVisible) {
-      setIsVisible(true)
+      if (!isVisible) setIsVisible(true)
       return
     }
 
@@ -61,99 +71,15 @@ export default function TemplatePreview({
           observer.disconnect()
         }
       },
-      { rootMargin: '300px' } // Pre-render 300px before scrolling into view
+      { rootMargin: '300px' }
     )
 
     observer.observe(elem)
     return () => observer.disconnect()
-  }, [priority, photos?.length, isVisible])
-
-  useEffect(() => {
-    if (isVisible) {
-      renderPreview()
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [template, photos, adjustments, isVisible])
+  }, [priority])
 
-  function getSlotAtPos(clientX: number, clientY: number): number {
-    const canvas = canvasRef.current
-    if (!canvas) return -1
-    const rect = canvas.getBoundingClientRect()
-    const W = template.stripWidth || 600
-    const H = template.stripHeight || 1800
-
-    const canvasX = ((clientX - rect.left) / rect.width) * W
-    const canvasY = ((clientY - rect.top) / rect.height) * H
-
-    for (let i = 0; i < template.slots.length; i++) {
-      const slot = template.slots[i]
-      if (
-        canvasX >= slot.x &&
-        canvasX <= slot.x + slot.width &&
-        canvasY >= slot.y &&
-        canvasY <= slot.y + slot.height
-      ) {
-        return i
-      }
-    }
-    return -1
-  }
-
-  function handlePointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
-    if (!onAdjustSlot) return
-    const slotIdx = getSlotAtPos(e.clientX, e.clientY)
-    if (slotIdx === -1 || !photos?.[slotIdx]) return
-
-    e.currentTarget.setPointerCapture(e.pointerId)
-    const currAdj = adjustments?.[slotIdx] || { zoom: 1, offsetX: 0, offsetY: 0 }
-    dragRef.current = {
-      isDragging: true,
-      slotIndex: slotIdx,
-      startX: e.clientX,
-      startY: e.clientY,
-      startOffX: currAdj.offsetX,
-      startOffY: currAdj.offsetY,
-      zoom: currAdj.zoom,
-    }
-    onSelectSlot?.(slotIdx)
-  }
-
-  function handlePointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
-    if (!dragRef.current.isDragging || !onAdjustSlot) return
-    const { slotIndex, startX, startY, startOffX, startOffY, zoom } = dragRef.current
-    const dx = (e.clientX - startX) * 0.4
-    const dy = (e.clientY - startY) * 0.4
-
-    const nextX = Math.max(-50, Math.min(50, startOffX + dx))
-    const nextY = Math.max(-50, Math.min(50, startOffY + dy))
-
-    onAdjustSlot(slotIndex, { zoom, offsetX: nextX, offsetY: nextY })
-  }
-
-  function handlePointerUp(e: React.PointerEvent<HTMLCanvasElement>) {
-    if (dragRef.current.isDragging) {
-      try {
-        e.currentTarget.releasePointerCapture(e.pointerId)
-      } catch {}
-      dragRef.current.isDragging = false
-    }
-  }
-
-  function handleWheel(e: React.WheelEvent<HTMLCanvasElement>) {
-    if (!onAdjustSlot) return
-    const slotIdx = getSlotAtPos(e.clientX, e.clientY)
-    if (slotIdx === -1 || !photos?.[slotIdx]) return
-
-    e.preventDefault()
-    const currAdj = adjustments?.[slotIdx] || { zoom: 1, offsetX: 0, offsetY: 0 }
-    const delta = e.deltaY > 0 ? -0.05 : 0.05
-    const nextZoom = Math.max(0.8, Math.min(2.5, Number((currAdj.zoom + delta).toFixed(2))))
-
-    onSelectSlot?.(slotIdx)
-    onAdjustSlot(slotIdx, { ...currAdj, zoom: nextZoom })
-  }
-
-  function renderPreview() {
+  const renderPreview = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas) return
 
@@ -170,6 +96,8 @@ export default function TemplatePreview({
     ctx.fillStyle = template.backgroundColor || '#FFFFFF'
     ctx.fillRect(0, 0, W, H)
 
+    const currentAdjustments = adjustmentsRef.current
+
     // Function to render remaining layers once background is ready
     const continueRender = () => {
       // Draw outer border only if no custom frame image
@@ -182,7 +110,7 @@ export default function TemplatePreview({
       // Draw photo slots
       template.slots.forEach((slot, i) => {
         const photo = photos?.[i]
-        const adjust = adjustments?.[i]
+        const adjust = currentAdjustments?.[i]
 
         if (photo) {
           const img = new Image()
@@ -246,130 +174,228 @@ export default function TemplatePreview({
     } else {
       continueRender()
     }
-  }
+  }, [template, photos]) // NOTE: adjustments intentionally NOT in deps — read from ref to avoid re-render on drag/zoom
 
+  // Re-render canvas when template or photos change (NOT on every adjustment change)
+  useEffect(() => {
+    if (isVisible) {
+      renderPreview()
+    }
+  }, [renderPreview, isVisible])
+
+  // Re-render canvas when adjustments actually change (debounced via requestAnimationFrame)
+  useEffect(() => {
+    if (!isVisible) return
+    const raf = requestAnimationFrame(() => renderPreview())
+    return () => cancelAnimationFrame(raf)
+  }, [adjustments, isVisible, renderPreview])
+
+  function getSlotAtPos(clientX: number, clientY: number): number {
+    const canvas = canvasRef.current
+    if (!canvas) return -1
+    const rect = canvas.getBoundingClientRect()
     const W = template.stripWidth || 600
     const H = template.stripHeight || 1800
 
-    return (
+    const canvasX = ((clientX - rect.left) / rect.width) * W
+    const canvasY = ((clientY - rect.top) / rect.height) * H
+
+    for (let i = 0; i < template.slots.length; i++) {
+      const slot = template.slots[i]
+      if (
+        canvasX >= slot.x &&
+        canvasX <= slot.x + slot.width &&
+        canvasY >= slot.y &&
+        canvasY <= slot.y + slot.height
+      ) {
+        return i
+      }
+    }
+    return -1
+  }
+
+  function handlePointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
+    if (!onAdjustSlot) return
+    const slotIdx = getSlotAtPos(e.clientX, e.clientY)
+    if (slotIdx === -1 || !photos?.[slotIdx]) return
+
+    e.currentTarget.setPointerCapture(e.pointerId)
+    const currAdj = adjustmentsRef.current?.[slotIdx] || { zoom: 1, offsetX: 0, offsetY: 0 }
+    dragRef.current = {
+      isDragging: true,
+      slotIndex: slotIdx,
+      startX: e.clientX,
+      startY: e.clientY,
+      startOffX: currAdj.offsetX,
+      startOffY: currAdj.offsetY,
+      zoom: currAdj.zoom,
+    }
+    onSelectSlot?.(slotIdx)
+  }
+
+  function handlePointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
+    if (!dragRef.current.isDragging || !onAdjustSlot) return
+    const { slotIndex, startX, startY, startOffX, startOffY, zoom } = dragRef.current
+    const dx = (e.clientX - startX) * 0.4
+    const dy = (e.clientY - startY) * 0.4
+
+    const nextX = Math.max(-50, Math.min(50, startOffX + dx))
+    const nextY = Math.max(-50, Math.min(50, startOffY + dy))
+
+    onAdjustSlot(slotIndex, { zoom, offsetX: nextX, offsetY: nextY })
+  }
+
+  function handlePointerUp(e: React.PointerEvent<HTMLCanvasElement>) {
+    if (dragRef.current.isDragging) {
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId)
+      } catch {}
+      dragRef.current.isDragging = false
+    }
+  }
+
+  function handleWheel(e: React.WheelEvent<HTMLCanvasElement>) {
+    if (!onAdjustSlot) return
+    const slotIdx = getSlotAtPos(e.clientX, e.clientY)
+    if (slotIdx === -1 || !photos?.[slotIdx]) return
+
+    e.preventDefault()
+    const currAdj = adjustmentsRef.current?.[slotIdx] || { zoom: 1, offsetX: 0, offsetY: 0 }
+    const delta = e.deltaY > 0 ? -0.05 : 0.05
+    const nextZoom = Math.max(0.8, Math.min(2.5, Number((currAdj.zoom + delta).toFixed(2))))
+
+    onSelectSlot?.(slotIdx)
+    onAdjustSlot(slotIdx, { ...currAdj, zoom: nextZoom })
+  }
+
+  const W = template.stripWidth || 600
+  const H = template.stripHeight || 1800
+
+  return (
+    <div
+      ref={containerRef}
+      className={styles.previewContainer}
+      style={{
+        background: template.backgroundColor || '#FFFFFF',
+      }}
+    >
       <div
-        ref={containerRef}
-        className={styles.previewContainer}
+        className={styles.canvasWrapper}
         style={{
-          background: template.backgroundColor || '#FFFFFF',
+          aspectRatio: `${W} / ${H}`,
         }}
       >
-        <div
-          className={styles.canvasWrapper}
+        <canvas
+          ref={canvasRef}
+          className={styles.canvas}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onWheel={handleWheel}
           style={{
-            aspectRatio: `${W} / ${H}`,
+            touchAction: onAdjustSlot ? 'none' : 'auto',
+            cursor: onAdjustSlot ? 'grab' : 'default',
           }}
-        >
-          <canvas
-            ref={canvasRef}
-            className={styles.canvas}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerCancel={handlePointerUp}
-            onWheel={handleWheel}
-            style={{
-              touchAction: onAdjustSlot ? 'none' : 'auto',
-              cursor: onAdjustSlot ? 'grab' : 'default',
-            }}
-            title={onAdjustSlot ? 'Klik & geser langsung di foto untuk memposisikan wajah | Scroll mouse untuk zoom' : undefined}
-            aria-label={`Preview template ${template.name}`}
-          />
+          title={onAdjustSlot ? 'Klik & geser langsung di foto untuk memposisikan wajah | Scroll mouse untuk zoom' : undefined}
+          aria-label={`Preview template ${template.name}`}
+        />
 
-          {/* Interactive overlays positioned over each photo slot for WYSIWYG adjust & retake */}
-          {template.slots.map((slot, i) => {
-            const photo = photos?.[i]
-            if (!photo || (!onAdjustSlot && !onRetakeSlot)) return null
-            const isDragging = dragRef.current.isDragging && dragRef.current.slotIndex === i
-            const currZoom = adjustments?.[i]?.zoom ?? 1
+        {/* Interactive overlays positioned over each photo slot for WYSIWYG adjust & retake */}
+        {(onAdjustSlot || onRetakeSlot) && template.slots.map((slot, i) => {
+          const photo = photos?.[i]
+          if (!photo) return null
+          const isDragging = draggingSlot === i
+          const currZoom = adjustments?.[i]?.zoom ?? 1
 
-            return (
-              <div
-                key={i}
-                className={`${styles.slotOverlay} ${onAdjustSlot ? styles.slotOverlayInteractive : ''} ${isDragging ? styles.slotOverlayDragging : ''}`}
-                style={{
-                  left: `${(slot.x / W) * 100}%`,
-                  top: `${(slot.y / H) * 100}%`,
-                  width: `${(slot.width / W) * 100}%`,
-                  height: `${(slot.height / H) * 100}%`,
-                }}
-                onPointerDown={(e) => {
-                  if (!onAdjustSlot) return
-                  e.currentTarget.setPointerCapture(e.pointerId)
-                  const currAdj = adjustments?.[i] || { zoom: 1, offsetX: 0, offsetY: 0 }
-                  dragRef.current = {
-                    isDragging: true,
-                    slotIndex: i,
-                    startX: e.clientX,
-                    startY: e.clientY,
-                    startOffX: currAdj.offsetX,
-                    startOffY: currAdj.offsetY,
-                    zoom: currAdj.zoom,
-                  }
-                  onSelectSlot?.(i)
-                }}
-                onPointerMove={(e) => {
-                  if (!dragRef.current.isDragging || dragRef.current.slotIndex !== i || !onAdjustSlot) return
-                  const { startX, startY, startOffX, startOffY, zoom } = dragRef.current
-                  const dx = (e.clientX - startX) * 0.4
-                  const dy = (e.clientY - startY) * 0.4
-                  const nextX = Math.max(-50, Math.min(50, startOffX + dx))
-                  const nextY = Math.max(-50, Math.min(50, startOffY + dy))
-                  onAdjustSlot(i, { zoom, offsetX: nextX, offsetY: nextY })
-                }}
-                onPointerUp={(e) => {
-                  if (dragRef.current.isDragging && dragRef.current.slotIndex === i) {
-                    try {
-                      e.currentTarget.releasePointerCapture(e.pointerId)
-                    } catch {}
-                    dragRef.current.isDragging = false
-                  }
-                }}
-                onWheel={(e) => {
-                  if (!onAdjustSlot) return
-                  e.preventDefault()
-                  const currAdj = adjustments?.[i] || { zoom: 1, offsetX: 0, offsetY: 0 }
-                  const delta = e.deltaY > 0 ? -0.05 : 0.05
-                  const nextZoom = Math.max(0.8, Math.min(2.5, Number((currAdj.zoom + delta).toFixed(2))))
-                  onSelectSlot?.(i)
-                  onAdjustSlot(i, { ...currAdj, zoom: nextZoom })
-                }}
-                title="Klik & geser langsung untuk pas-kan muka | Scroll untuk zoom"
-              >
-                {onRetakeSlot && (
-                  <button
-                    type="button"
-                    className={styles.slotRetakeBtn}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onRetakeSlot(i)
-                    }}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    title={`Foto ulang foto ke-${i + 1}`}
-                    aria-label={`Foto ulang foto ke-${i + 1}`}
-                  >
-                    <RefreshIcon size={12} />
-                    <span>Retake</span>
-                  </button>
+          return (
+            <div
+              key={i}
+              className={`${styles.slotOverlay} ${onAdjustSlot ? styles.slotOverlayInteractive : ''} ${isDragging ? styles.slotOverlayDragging : ''}`}
+              style={{
+                left: `${(slot.x / W) * 100}%`,
+                top: `${(slot.y / H) * 100}%`,
+                width: `${(slot.width / W) * 100}%`,
+                height: `${(slot.height / H) * 100}%`,
+              }}
+              onPointerDown={(e) => {
+                if (!onAdjustSlot) return
+                e.currentTarget.setPointerCapture(e.pointerId)
+                const currAdj = adjustmentsRef.current?.[i] || { zoom: 1, offsetX: 0, offsetY: 0 }
+                dragRef.current = {
+                  isDragging: true,
+                  slotIndex: i,
+                  startX: e.clientX,
+                  startY: e.clientY,
+                  startOffX: currAdj.offsetX,
+                  startOffY: currAdj.offsetY,
+                  zoom: currAdj.zoom,
+                }
+                setDraggingSlot(i)
+                onSelectSlot?.(i)
+              }}
+              onPointerMove={(e) => {
+                if (!dragRef.current.isDragging || dragRef.current.slotIndex !== i || !onAdjustSlot) return
+                const { startX, startY, startOffX, startOffY, zoom } = dragRef.current
+                const dx = (e.clientX - startX) * 0.4
+                const dy = (e.clientY - startY) * 0.4
+                const nextX = Math.max(-50, Math.min(50, startOffX + dx))
+                const nextY = Math.max(-50, Math.min(50, startOffY + dy))
+                onAdjustSlot(i, { zoom, offsetX: nextX, offsetY: nextY })
+              }}
+              onPointerUp={(e) => {
+                if (dragRef.current.isDragging && dragRef.current.slotIndex === i) {
+                  try {
+                    e.currentTarget.releasePointerCapture(e.pointerId)
+                  } catch {}
+                  dragRef.current.isDragging = false
+                  setDraggingSlot(-1)
+                }
+              }}
+              onPointerCancel={() => {
+                dragRef.current.isDragging = false
+                setDraggingSlot(-1)
+              }}
+              onWheel={(e) => {
+                if (!onAdjustSlot) return
+                e.preventDefault()
+                const currAdj = adjustmentsRef.current?.[i] || { zoom: 1, offsetX: 0, offsetY: 0 }
+                const delta = e.deltaY > 0 ? -0.05 : 0.05
+                const nextZoom = Math.max(0.8, Math.min(2.5, Number((currAdj.zoom + delta).toFixed(2))))
+                onSelectSlot?.(i)
+                onAdjustSlot(i, { ...currAdj, zoom: nextZoom })
+              }}
+              title="Klik & geser langsung untuk pas-kan muka | Scroll untuk zoom"
+            >
+              {onRetakeSlot && (
+                <button
+                  type="button"
+                  className={styles.slotRetakeBtn}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onRetakeSlot(i)
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  title={`Foto ulang foto ke-${i + 1}`}
+                  aria-label={`Foto ulang foto ke-${i + 1}`}
+                >
+                  <RefreshIcon size={12} />
+                  <span>Retake</span>
+                </button>
+              )}
+
+              <div className={styles.slotBottomBar}>
+                {currZoom !== 1 && (
+                  <span className={styles.slotZoomPill}>{currZoom.toFixed(1)}x</span>
                 )}
-
-                <div className={styles.slotBottomBar}>
-                  {currZoom !== 1 && (
-                    <span className={styles.slotZoomPill}>{currZoom.toFixed(1)}x</span>
-                  )}
-                </div>
               </div>
-            )
-          })}
-        </div>
+            </div>
+          )
+        })}
       </div>
-    )
-  }
+    </div>
+  )
+}
 
 function drawOverlayAndDecorations(
   ctx: CanvasRenderingContext2D,

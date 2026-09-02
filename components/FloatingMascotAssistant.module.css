@@ -1,58 +1,171 @@
-/* ===== Floating Mascot Assistant ===== */
-.floatingContainer {
+/* ===== Floating Mascot Assistant (Interactive & Draggable) ===== */
+.floatingMascotWrapper {
   position: fixed;
-  bottom: 28px;
-  right: 24px;
-  z-index: 990;
+  z-index: 9999;
   display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  pointer-events: none;
-  animation: slideUpFade 0.3s ease;
-}
-
-.withBottomNav {
-  bottom: 86px !important;
-}
-
-@keyframes slideUpFade {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.bubbleWrap {
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  touch-action: none;
   pointer-events: auto;
+  transition: box-shadow 0.2s ease;
+  will-change: transform, left, top;
+}
+
+/* Floating Draggable Button */
+.mascotDraggableBtn {
+  background: transparent;
+  border: none;
+  cursor: grab;
+  padding: 0;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   position: relative;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+  transition: transform 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.mascotDraggableBtn:active {
+  cursor: grabbing;
+}
+
+.mascotArtWrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 8px 20px rgba(13, 59, 36, 0.2));
+  transition: filter 0.2s ease;
+}
+
+.mascotDraggableBtn:hover .mascotArtWrap {
+  filter: drop-shadow(0 12px 24px rgba(13, 59, 36, 0.3)) drop-shadow(0 0 12px rgba(44, 232, 140, 0.4));
+}
+
+/* Dragging state */
+.isDragging .mascotDraggableBtn {
+  cursor: grabbing;
+}
+
+.isDragging .mascotArtWrap {
+  filter: drop-shadow(0 20px 32px rgba(13, 59, 36, 0.38)) drop-shadow(0 0 16px rgba(255, 223, 115, 0.6));
+}
+
+/* Landing bounce animation */
+.isLanded .mascotDraggableBtn {
+  animation: mascotLandBounce 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes mascotLandBounce {
+  0% { transform: scale(1.2) translateY(-14px); }
+  45% { transform: scale(0.9, 1.15) translateY(4px); }
+  75% { transform: scale(1.08, 0.95) translateY(-2px); }
+  100% { transform: scale(1) translateY(0); }
+}
+
+/* Little sparkle badge indicator */
+.dragBadge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  font-size: 0.75rem;
+  background: #FFFFFF;
+  border: 1.5px solid #FFDF73;
+  border-radius: 9999px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(13, 59, 36, 0.15);
+  animation: badgePulse 2.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes badgePulse {
+  0%, 100% { transform: scale(0.95); opacity: 0.85; }
+  50% { transform: scale(1.15) rotate(15deg); opacity: 1; }
+}
+
+/* Speech Bubble Wrap */
+.bubbleWrap {
+  position: absolute;
   background: #FFFFFF;
   border: 1.5px solid #A2CFA9;
-  border-radius: 16px 16px 4px 16px;
+  border-radius: 16px;
   padding: 10px 14px;
-  box-shadow: 0 8px 24px rgba(12, 30, 20, 0.14);
-  max-width: 220px;
-  animation: popIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  box-shadow: 0 10px 28px rgba(12, 30, 20, 0.16);
+  min-width: 170px;
+  max-width: 240px;
+  pointer-events: auto;
+  z-index: 10000;
+  animation: bubblePop 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  backdrop-filter: blur(8px);
 }
 
-@keyframes popIn {
+@keyframes bubblePop {
   0% { transform: scale(0.8); opacity: 0; }
   100% { transform: scale(1); opacity: 1; }
 }
 
+/* Smart Bubble Positioning & Arrows */
+.bubbleLeft {
+  right: calc(100% + 12px);
+}
+
+.bubbleRight {
+  left: calc(100% + 12px);
+}
+
+.bubbleAbove {
+  bottom: calc(100% - 10px);
+}
+
+.bubbleBelow {
+  top: calc(100% - 10px);
+}
+
+/* Arrow indicators based on relative quadrant */
 .bubbleWrap::after {
   content: '';
   position: absolute;
-  right: -7px;
-  bottom: 12px;
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   background: #FFFFFF;
+}
+
+.bubbleLeft.bubbleAbove::after {
+  right: -6px;
+  bottom: 16px;
   border-top: 1.5px solid #A2CFA9;
   border-right: 1.5px solid #A2CFA9;
+  transform: rotate(45deg);
+}
+
+.bubbleLeft.bubbleBelow::after {
+  right: -6px;
+  top: 16px;
+  border-top: 1.5px solid #A2CFA9;
+  border-right: 1.5px solid #A2CFA9;
+  transform: rotate(45deg);
+}
+
+.bubbleRight.bubbleAbove::after {
+  left: -6px;
+  bottom: 16px;
+  border-bottom: 1.5px solid #A2CFA9;
+  border-left: 1.5px solid #A2CFA9;
+  transform: rotate(45deg);
+}
+
+.bubbleRight.bubbleBelow::after {
+  left: -6px;
+  top: 16px;
+  border-bottom: 1.5px solid #A2CFA9;
+  border-left: 1.5px solid #A2CFA9;
   transform: rotate(45deg);
 }
 
@@ -61,13 +174,14 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 3px;
+  margin-bottom: 4px;
 }
 
 .bubbleTitle {
   font-size: 0.75rem;
   font-weight: 800;
   color: #0D3B24;
+  letter-spacing: -0.01em;
 }
 
 .closeBtn {
@@ -75,16 +189,17 @@
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  padding: 0;
+  padding: 2px;
+  border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.75rem;
-  line-height: 1;
+  transition: color 0.15s ease, background 0.15s ease;
 }
 
 .closeBtn:hover {
   color: #DC2626;
+  background: #FEE2E2;
 }
 
 .bubbleText {
@@ -95,38 +210,12 @@
   font-weight: 500;
 }
 
-.mascotBtn {
-  pointer-events: auto;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-  transition: transform 0.2s ease;
-  filter: drop-shadow(0 6px 16px rgba(12, 30, 20, 0.16));
-}
-
-.mascotBtn:hover {
-  transform: scale(1.08) translateY(-2px);
-}
-
-.mascotBtn:active {
-  transform: scale(0.95);
-}
-
-/* Mobile Adjustments */
-@media (max-width: 900px) {
-  .floatingContainer {
-    bottom: 24px;
-    right: 16px;
-    gap: 8px;
-  }
-  .withBottomNav {
-    bottom: 84px !important;
-  }
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
   .bubbleWrap {
-    max-width: 190px;
+    max-width: 200px;
     padding: 8px 12px;
-    border-radius: 14px 14px 4px 14px;
+    border-radius: 14px;
   }
   .bubbleText {
     font-size: 0.6875rem;

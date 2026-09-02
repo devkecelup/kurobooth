@@ -18,7 +18,7 @@ function isSupabaseConfigured(): boolean {
 
 const IMGBB_API_KEY = process.env.IMGBB_API_KEY ?? '18c5d23114ae652790650c0adc75cce0'
 
-/** Upload original high-res image to ImgBB (free unlimited image hosting) */
+/** Upload to ImgBB (free unlimited image hosting) */
 async function uploadToImgBB(buffer: Buffer, fileName: string): Promise<string | null> {
   if (!IMGBB_API_KEY) return null
   try {
@@ -53,12 +53,12 @@ async function uploadToImgBB(buffer: Buffer, fileName: string): Promise<string |
   return null
 }
 
-/** Upload lossless image to Catbox.moe (permanent free hosting without recompression) */
-async function uploadToCatbox(buffer: Buffer, fileName: string): Promise<string | null> {
+/** Upload to Catbox.moe (permanent free hosting) */
+async function uploadToCatbox(buffer: Buffer, fileName: string, mimeType: string): Promise<string | null> {
   try {
     const formData = new FormData()
     formData.append('reqtype', 'fileupload')
-    const blob = new Blob([new Uint8Array(buffer)], { type: 'image/png' })
+    const blob = new Blob([new Uint8Array(buffer)], { type: mimeType })
     formData.append('fileToUpload', blob, fileName)
 
     const controller = new AbortController()
@@ -95,7 +95,13 @@ export async function POST(request: NextRequest) {
 
     const arrayBuffer = await file.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
-    const fileName = `kurobooth-${shareCode}.png`
+
+    // Detect file type from the uploaded file's name/type
+    const isWebP = file.name.endsWith('.webp') || file.type === 'image/webp'
+    const ext = isWebP ? 'webp' : 'png'
+    const mimeType = isWebP ? 'image/webp' : 'image/png'
+    const fileName = `kurobooth-${shareCode}.${ext}`
+    const remotePath = `results/${shareCode}.${ext}`
 
     // 1. Primary: Upload directly to Supabase Storage bucket 'photobooth-results'
     let supabaseUrl: string | null = null
@@ -103,24 +109,23 @@ export async function POST(request: NextRequest) {
       try {
         const { supabaseAdmin, supabase } = await import('@/lib/supabase')
         const client = supabaseAdmin || supabase
-        const remotePath = `results/${shareCode}.png`
 
         let { error: uploadError } = await client.storage
           .from('photobooth-results')
           .upload(remotePath, buffer, {
-            contentType: 'image/png',
+            contentType: mimeType,
             upsert: true,
           })
 
         // Auto-create bucket if missing
-        if (uploadError && (uploadError.message?.toLowerCase().includes('bucket not found') || (uploadError as any).statusCode === '404')) {
+        if (uploadError && (uploadError.message?.toLowerCase().includes('bucket not found') || (uploadError as { statusCode?: string }).statusCode === '404')) {
           console.log('[Upload] Bucket photobooth-results not found, attempting auto-creation...')
           try {
             await client.storage.createBucket('photobooth-results', { public: true })
             const retry = await client.storage
               .from('photobooth-results')
               .upload(remotePath, buffer, {
-                contentType: 'image/png',
+                contentType: mimeType,
                 upsert: true,
               })
             uploadError = retry.error
@@ -146,17 +151,17 @@ export async function POST(request: NextRequest) {
     // 2. Fallback: Catbox
     let catboxUrl: string | null = null
     if (!supabaseUrl) {
-      catboxUrl = await uploadToCatbox(buffer, fileName)
+      catboxUrl = await uploadToCatbox(buffer, fileName, mimeType)
     }
 
     // 3. Fallback: Local disk for development
-    let localUrl = `/uploads/results/${shareCode}.png`
+    const localUrl = `/uploads/results/${shareCode}.${ext}`
     try {
       const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'results')
       await fs.mkdir(uploadDir, { recursive: true })
-      const filePath = path.join(uploadDir, `${shareCode}.png`)
+      const filePath = path.join(uploadDir, `${shareCode}.${ext}`)
       await fs.writeFile(filePath, buffer)
-    } catch (e) {
+    } catch {
       // Ignored in serverless
     }
 

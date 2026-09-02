@@ -23,15 +23,22 @@ function isAdmin(request: NextRequest): boolean {
 }
 
 // Map TemplatesBooth format to our format
-function mapTbTemplate(tbData: any) {
-  const slug = tbData.post_url ? tbData.post_url.split('/').filter(Boolean).pop() : 'tb-' + Math.random().toString(36).slice(2)
-  const name = slug.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-  const photoCount = parseInt(tbData.no_of_images || '4') || 4
-  const tags = tbData.tags ? tbData.tags.map((t: any) => t.slug) : []
+function mapTbTemplate(tbData: Record<string, unknown>) {
+  const postUrl = typeof tbData.post_url === 'string' ? tbData.post_url : ''
+  const slug = postUrl ? postUrl.split('/').filter(Boolean).pop() : 'tb-' + Math.random().toString(36).slice(2)
+  const name = (slug as string).split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+  const photoCount = parseInt(String(tbData.no_of_images || '4')) || 4
+  const rawTags = Array.isArray(tbData.tags) ? tbData.tags : []
+  const tags = rawTags.map((t: Record<string, unknown>) => t.slug)
   
   let slots = []
   if (tbData.layout_size === '26strip') {
-    if (photoCount === 3) {
+    if (photoCount === 2) {
+      slots = [
+        { x: 40, y: 80, width: 520, height: 680, borderRadius: 14 },
+        { x: 40, y: 820, width: 520, height: 680, borderRadius: 14 }
+      ]
+    } else if (photoCount === 3) {
       slots = [
         { x: 40, y: 70, width: 520, height: 450, borderRadius: 12 },
         { x: 40, y: 560, width: 520, height: 450, borderRadius: 12 },
@@ -65,21 +72,21 @@ function mapTbTemplate(tbData: any) {
   return {
     id: 'tb-' + slug,
     name: name,
-    description: tbData.type_name || 'TemplatesBooth',
+    description: String(tbData.type_name || 'TemplatesBooth'),
     photoCount: photoCount,
     stripWidth: 600,
     stripHeight: 1800,
     backgroundColor: '#FFFFFF',
     accentColor: '#0D3B24',
     textColor: '#0C1E14',
-    frameImageUrl: tbData.src, // using thumbnail as background
+    frameImageUrl: typeof tbData.src === 'string' ? tbData.src : undefined, // using thumbnail as background
     frameMode: 'background',
     slots: slots,
     decorations: [],
     tags: tags,
     printSize: tbData.layout_size === '26strip' ? '2x6' : '4x6',
     isActive: true,
-    createdAt: tbData.published_at || new Date().toISOString(),
+    createdAt: typeof tbData.published_at === 'string' ? tbData.published_at : new Date().toISOString(),
   }
 }
 
@@ -107,7 +114,7 @@ export async function GET(request: NextRequest) {
         clearTimeout(timeout)
         if (tbRes.ok) {
           const tbData = await tbRes.json()
-          const item = tbData?.data?.find((t: any) => t.post_url.includes(slug))
+          const item = tbData?.data?.find((t: Record<string, unknown>) => typeof t.post_url === 'string' && t.post_url.includes(slug))
           if (item) {
             return NextResponse.json({ template: mapTbTemplate(item) }, { headers })
           }
@@ -152,10 +159,10 @@ export async function GET(request: NextRequest) {
         }
         const { data, error } = await query.order('created_at', { ascending: false })
 
-        if (!error && data && data.length > 0) {
+        if (!error && data) {
           const dbIds = new Set(data.map((t: Record<string, unknown>) => t.id))
           const hardcoded = TEMPLATES.filter(t => !dbIds.has(t.id))
-          return NextResponse.json({ templates: [...data.map(normalizeFromDb), ...(showAll ? [] : hardcoded)] }, { headers })
+          return NextResponse.json({ templates: [...data.map(normalizeFromDb), ...hardcoded] }, { headers })
         }
       }
     } catch (err) {
@@ -205,13 +212,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Field nama dan slot foto wajib diisi.' }, { status: 400 })
     }
 
-    const id = (name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'template') + '-' + Date.now()
+    const id = (adminMode && body.id) ? body.id : ((name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'template') + '-' + Date.now())
     const isActive = adminMode ? true : false
+
+    const creator = (creatorName || '').trim()
+    const fallbackDesc = creator
+      ? (creator.startsWith('@') ? `Oleh ${creator}` : `Karya ${creator}`)
+      : 'Karya Kreator Komunitas'
 
     const newTemplate = {
       id,
       name,
-      description: (description ? description + ' ' : '') + (creatorName ? `[Kreator: ${creatorName}]` : ''),
+      description: description?.trim() || fallbackDesc,
       photoCount: Number(photoCount) || slots.length,
       stripWidth: Number(stripWidth) || 600,
       stripHeight: Number(stripHeight) || 1800,
@@ -252,7 +264,7 @@ export async function POST(request: NextRequest) {
 
         const { data, error } = await supabase
           .from('templates')
-          .insert([record])
+          .upsert([record], { onConflict: 'id' })
           .select()
           .single()
 

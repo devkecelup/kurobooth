@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
 
     // 2. Scan local uploads folder
     const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'results')
-    const localList: any[] = []
+    const localList: { id: string; template_id: string; image_url: string; share_code: string; created_at: string }[] = []
     try {
       const files = await fs.readdir(uploadDir)
       for (const file of files) {

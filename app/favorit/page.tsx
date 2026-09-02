@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { TEMPLATES, TemplateConfig } from '@/lib/templates'
@@ -20,8 +20,6 @@ import {
   PaletteIcon,
   CameraIcon,
   SparklesIcon,
-  ArrowRightIcon,
-  SlidersIcon,
 } from '@/components/Icons'
 import styles from './page.module.css'
 
@@ -39,36 +37,44 @@ export default function FavoritPage() {
 
   // Load favorites from LocalStorage
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('kurobooth_favorites')
-      if (saved) {
-        setFavorites(JSON.parse(saved))
+    const timer = setTimeout(() => {
+      try {
+        const saved = localStorage.getItem('kurobooth_favorites')
+        if (saved) {
+          setFavorites(JSON.parse(saved))
+        }
+      } catch {
+        // LocalStorage not available
       }
-    } catch {
-      // LocalStorage not available
-    }
+    }, 0)
+    return () => clearTimeout(timer)
   }, [])
 
   // Sync DB / custom templates
-  useEffect(() => {
-    async function loadDbTemplates() {
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 2000)
-      try {
-        const res = await fetch('/api/templates', { signal: controller.signal })
-        clearTimeout(timeout)
-        if (res.ok) {
-          const data = await res.json()
-          if (data.templates && data.templates.length > 0) {
-            setTemplates(data.templates)
-          }
+  const loadDbTemplates = useCallback(async () => {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 3000)
+    try {
+      const res = await fetch('/api/templates', { signal: controller.signal })
+      clearTimeout(timeout)
+      if (res.ok) {
+        const data = await res.json()
+        if (data.templates && data.templates.length > 0) {
+          setTemplates(data.templates)
         }
-      } catch {
-        clearTimeout(timeout)
       }
+    } catch {
+      clearTimeout(timeout)
     }
-    loadDbTemplates()
   }, [])
+
+  useEffect(() => {
+    loadDbTemplates()
+    window.addEventListener('kurobooth:templates-updated', loadDbTemplates)
+    return () => {
+      window.removeEventListener('kurobooth:templates-updated', loadDbTemplates)
+    }
+  }, [loadDbTemplates])
 
   function toggleFavorite(id: string, e?: React.MouseEvent) {
     e?.stopPropagation()

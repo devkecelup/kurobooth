@@ -1,6 +1,5 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   CameraIcon,
@@ -22,13 +21,6 @@ interface Props {
 }
 
 export default function Footer({ onSelectCategory, onOpenCreator, onOpenLookup }: Props) {
-  const router = useRouter()
-
-  function handleScrollToTop() {
-    if (typeof window !== 'undefined') {
-      window.scrollTo({ top: 0, behavior: 'smooth' })
-    }
-  }
 
   function handleCategory(cat: string) {
     onSelectCategory?.(cat)

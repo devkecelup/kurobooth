@@ -1,13 +1,9 @@
 'use client'
 
-import { useState, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useCallback, useRef } from 'react'
 import {
-  WandIcon,
   CloseIcon,
   UploadIcon,
-  PaletteIcon,
-  ArrowRightIcon,
   SparklesIcon,
   CheckCircleIcon,
   AlertCircleIcon,
@@ -18,11 +14,24 @@ import TemplatePreview from './TemplatePreview'
 import { TemplateConfig } from '@/lib/templates'
 import styles from './CreatorModal.module.css'
 
-const PRESET_4_VERTICAL = [
+interface SlotDef {
+  x: number
+  y: number
+  width: number
+  height: number
+  borderRadius?: number
+}
+
+const PRESET_4_VERTICAL: SlotDef[] = [
   { x: 40, y: 60, width: 520, height: 360, borderRadius: 8 },
   { x: 40, y: 450, width: 520, height: 360, borderRadius: 8 },
   { x: 40, y: 840, width: 520, height: 360, borderRadius: 8 },
   { x: 40, y: 1230, width: 520, height: 360, borderRadius: 8 },
+]
+
+const PRESET_2_VERTICAL: SlotDef[] = [
+  { x: 40, y: 80, width: 520, height: 680, borderRadius: 14 },
+  { x: 40, y: 820, width: 520, height: 680, borderRadius: 14 },
 ]
 
 const PRESET_3_VERTICAL = [
@@ -61,7 +70,8 @@ function rgbToHex(r: number, g: number, b: number) {
 function rgbToHsv(r: number, g: number, b: number) {
   r /= 255; g /= 255; b /= 255;
   const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  let h = 0, s = 0, v = max;
+  let h = 0, s = 0;
+  const v = max;
   const d = max - min;
   s = max === 0 ? 0 : d / max;
   if (max === min) {
@@ -100,9 +110,13 @@ function cleanIsolatedSpecks(imgData: ImageData, maxSpeckSize: number = 1000) {
         while (qHead < queue.length) {
           const curr = queue[qHead++];
           component.push(curr);
+          
+          // IMPORTANT: Do NOT break early here! If we break early, we leave an artificial 
+          // boundary of unvisited pixels. The next iteration will hit this artificial 
+          // boundary, think it's a small isolated speck, and erase it, eating away the 
+          // solid frame chunk by chunk. We must explore the ENTIRE component.
           if (component.length > maxSpeckSize) {
             isLarge = true;
-            break;
           }
 
           const cx = curr % width;
@@ -124,8 +138,8 @@ function cleanIsolatedSpecks(imgData: ImageData, maxSpeckSize: number = 1000) {
         }
 
         if (!isLarge && !touchesBorder) {
-          for (const p of component) {
-            data[p * 4 + 3] = 0;
+          for (let i = 0; i < component.length; i++) {
+            data[component[i] * 4 + 3] = 0;
           }
         }
       }
@@ -206,15 +220,18 @@ function detectTransparentSlots(imgData: ImageData, pad: number = 15): { x: numb
   return detectedSlots
 }
 
-// Process Image Chroma Key
+// Process Image Chroma Key — uses flood-fill from image border so ONLY
+// pixels connected to the chroma-colored "background" are made transparent.
+// Frame decoration that coincidentally shares the chroma color is protected
+// because it is not reachable from the image edge.
 async function applyChromaKey(
   imageSrc: string,
   chromaHex: string,
-  tolerance: number = 35,
+  tolerance: number = 20,
   smoothness: number = 5,
   slotPadding: number = 15,
-  despeckle: number = 1000
-): Promise<{ dataUrl: string, detectedSlots: any[] }> {
+  despeckle: number = 600
+): Promise<{ dataUrl: string, detectedSlots: SlotDef[] }> {
   return new Promise((resolve) => {
     const img = new Image()
     img.crossOrigin = 'anonymous'
@@ -228,36 +245,138 @@ async function applyChromaKey(
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height)
       const data = imgData.data
+      const { width, height } = imgData
 
       const target = hexToRgb(chromaHex)
       const targetHsv = rgbToHsv(target.r, target.g, target.b)
       const isTargetSaturated = targetHsv.s > 25
 
-      const tolDist = (tolerance / 100) * 441.67
-      const smoothDist = (smoothness / 100) * 100
+      // Scale tolerance to Euclidean-style distance
+      const tolDist = (tolerance / 100) * 380
+      // Smoothness: pixels within this extra range get partial transparency
+      const smoothRange = (smoothness / 100) * 80
 
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i]
-        const g = data[i + 1]
-        const b = data[i + 2]
-
-        let dist = 0
+      // Helper: compute how different a pixel is from the chroma color
+      function colorDist(r: number, g: number, b: number): number {
         if (isTargetSaturated) {
           const pixHsv = rgbToHsv(r, g, b)
           let hueDiff = Math.abs(pixHsv.h - targetHsv.h)
           if (hueDiff > 180) hueDiff = 360 - hueDiff
           const satDiff = Math.abs(pixHsv.s - targetHsv.s)
           const valDiff = Math.abs(pixHsv.v - targetHsv.v)
-          dist = (hueDiff / 180) * 320 + (satDiff / 100) * 80 + (valDiff / 100) * 60
+          // Weight hue heavily for saturated targets (green/blue/magenta screens)
+          return (hueDiff / 180) * 280 + (satDiff / 100) * 60 + (valDiff / 100) * 40
         } else {
-          dist = Math.sqrt((r - target.r) ** 2 + (g - target.g) ** 2 + (b - target.b) ** 2)
+          // Non-saturated (white/black/gray) — use RGB Euclidean
+          return Math.sqrt((r - target.r) ** 2 + (g - target.g) ** 2 + (b - target.b) ** 2)
         }
+      }
 
+      // --- Phase 1: flood-fill dari tepi — hanya pixel yang SANGAT cocok dengan warna
+      // chroma yang bisa jadi seed (threshold ketat). Ini mencegah artefak JPEG atau
+      // pixel frame yang sedikit mirip chroma dari men-trigger flood fill.
+      const inRegion = new Uint8Array(width * height)
+      const queue: number[] = []
+
+      // Seed threshold: harus match KUAT (bukan cuma dalam smoothRange) untuk mulai dari tepi
+      const seedThreshold = tolDist * 0.6
+
+      function enqueueEdge(px: number) {
+        if (inRegion[px]) return
+        const i = px * 4
+        // Pixel tepi harus punya ALPHA penuh (bukan sudah transparan)
+        if (data[i + 3] < 200) { inRegion[px] = 2; return }
+        const dist = colorDist(data[i], data[i + 1], data[i + 2])
+        // Threshold ketat untuk edge seed — hanya warna yang BENAR-BENAR cocok
+        inRegion[px] = dist <= seedThreshold ? 1 : 2
+        if (inRegion[px] === 1) queue.push(px)
+      }
+
+      function enqueueNeighbor(px: number) {
+        if (inRegion[px]) return
+        const i = px * 4
+        if (data[i + 3] < 200) { inRegion[px] = 2; return }
+        const dist = colorDist(data[i], data[i + 1], data[i + 2])
+        // Propagasi lebih longgar (tolDist + smoothRange) setelah seed dikonfirmasi
+        inRegion[px] = dist <= tolDist + smoothRange ? 1 : 2
+        if (inRegion[px] === 1) queue.push(px)
+      }
+
+      // Seed dari 4 sisi dengan threshold ketat
+      for (let x = 0; x < width; x++) {
+        enqueueEdge(x)
+        enqueueEdge((height - 1) * width + x)
+      }
+      for (let y = 1; y < height - 1; y++) {
+        enqueueEdge(y * width)
+        enqueueEdge(y * width + width - 1)
+      }
+
+      let head = 0
+      while (head < queue.length) {
+        const px = queue[head++]
+        const cx = px % width
+        const cy = Math.floor(px / width)
+        const neighbors = [
+          cy > 0          ? px - width     : -1,
+          cy < height - 1 ? px + width     : -1,
+          cx > 0          ? px - 1         : -1,
+          cx < width - 1  ? px + 1         : -1,
+        ]
+        for (const n of neighbors) {
+          if (n >= 0) enqueueNeighbor(n)
+        }
+      }
+
+      // --- Phase 2: also erase INTERIOR solid chroma-colored holes (photo slots) ---
+      // These are enclosed rectangles of pure chroma color not touching the border.
+      // We flood-fill from unvisited interior pixels that match the chroma.
+      for (let y = 2; y < height - 2; y++) {
+        for (let x = 2; x < width - 2; x++) {
+          const px = y * width + x
+          if (inRegion[px]) continue
+          const i = px * 4
+          const dist = colorDist(data[i], data[i + 1], data[i + 2])
+          if (dist > tolDist) continue
+          // Found an interior chroma pixel — flood fill this pocket
+          const pocketQueue = [px]
+          inRegion[px] = 1
+          let pHead = 0
+          while (pHead < pocketQueue.length) {
+            const ppx = pocketQueue[pHead++]
+            const pcx = ppx % width
+            const pcy = Math.floor(ppx / width)
+            const pn = [
+              pcy > 0          ? ppx - width     : -1,
+              pcy < height - 1 ? ppx + width     : -1,
+              pcx > 0          ? ppx - 1         : -1,
+              pcx < width - 1  ? ppx + 1         : -1,
+            ]
+            for (const n of pn) {
+              if (n >= 0 && !inRegion[n]) {
+                const ni = n * 4
+                const nd = colorDist(data[ni], data[ni + 1], data[ni + 2])
+                if (nd <= tolDist + smoothRange) {
+                  inRegion[n] = 1
+                  pocketQueue.push(n)
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // --- Phase 3: apply transparency based on flood-fill result ---
+      for (let px = 0; px < width * height; px++) {
+        if (inRegion[px] !== 1) continue
+        const i = px * 4
+        const dist = colorDist(data[i], data[i + 1], data[i + 2])
         if (dist <= tolDist) {
           data[i + 3] = 0
-        } else if (smoothDist > 0 && dist < tolDist + smoothDist) {
-          const ratio = (dist - tolDist) / smoothDist
-          data[i + 3] = Math.min(data[i + 3], Math.round(255 * ratio))
+        } else if (smoothRange > 0 && dist < tolDist + smoothRange) {
+          // Smooth edge: partial transparency
+          const ratio = (dist - tolDist) / smoothRange
+          data[i + 3] = Math.min(data[i + 3], Math.round(255 * ratio * ratio)) // quadratic fade
         }
       }
 
@@ -277,6 +396,34 @@ async function applyChromaKey(
   })
 }
 
+/** Convert any image dataURL (JPG/PNG/etc) to WebP dataURL */
+async function convertToWebP(dataUrl: string, quality: number = 0.92): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = img.naturalWidth
+      canvas.height = img.naturalHeight
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { resolve(dataUrl); return }
+      ctx.drawImage(img, 0, 0)
+      resolve(canvas.toDataURL('image/webp', quality))
+    }
+    img.onerror = () => resolve(dataUrl)
+    img.src = dataUrl
+  })
+}
+
+/** Convert a dataURL to a Blob */
+function dataUrlToWebPBlob(dataUrl: string): Blob {
+  const [header, base64] = dataUrl.split(',')
+  const mime = header.match(/:(.*?);/)?.[1] ?? 'image/webp'
+  const binary = atob(base64)
+  const arr = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i)
+  return new Blob([arr], { type: mime })
+}
+
 interface Props {
   isOpen: boolean
   onClose: () => void
@@ -284,24 +431,27 @@ interface Props {
 }
 
 export default function CreatorModal({ isOpen, onClose, onAddCustomTemplate }: Props) {
-  const router = useRouter()
+  // Stable unique ID — must not be recalculated on every render
+  const customIdRef = useRef('custom-' + Date.now())
   const [name, setName] = useState('')
   const [creatorName, setCreatorName] = useState('')
-  const [description, setDescription] = useState('')
-  const [tags, setTags] = useState('komunitas, aesthetic')
-  const [preset, setPreset] = useState<'4-vert' | '3-vert' | '6-grid'>('4-vert')
-  const [customSlots, setCustomSlots] = useState<any[]>(PRESET_4_VERTICAL)
+  const [description] = useState('')
+  const [tags] = useState('komunitas, aesthetic')
+  const [preset, setPreset] = useState<'2-vert' | '3-vert' | '4-vert' | '6-grid'>('4-vert')
+  const [customSlots, setCustomSlots] = useState<SlotDef[]>(PRESET_4_VERTICAL)
   const [bgColor, setBgColor] = useState('#FFFFFF')
   const [accentColor, setAccentColor] = useState('#0D3B24')
 
   // Chroma Key State
   const [rawImageSrc, setRawImageSrc] = useState<string>('')
   const [processedFrameUrl, setProcessedFrameUrl] = useState<string>('')
-  const [chromaEnabled, setChromaEnabled] = useState<boolean>(true)
+  const [chromaEnabled, setChromaEnabled] = useState<boolean>(false)
   const [chromaColor, setChromaColor] = useState<string>('#00FF00')
-  const [chromaTolerance, setChromaTolerance] = useState<number>(35)
-  const [chromaSmoothness, setChromaSmoothness] = useState<number>(5)
-  const [slotPadding, setSlotPadding] = useState<number>(15)
+  const [chromaTolerance, setChromaTolerance] = useState<number>(20)
+  const [chromaSmoothness] = useState<number>(5)
+  const [slotPadding] = useState<number>(15)
+  const [autoTransparent, setAutoTransparent] = useState<boolean>(false)
+  const [showText, setShowText] = useState<boolean>(true)
   const [detectedSlotCount, setDetectedSlotCount] = useState<number>(0)
   const [isProcessingChroma, setIsProcessingChroma] = useState<boolean>(false)
 
@@ -329,6 +479,11 @@ export default function CreatorModal({ isOpen, onClose, onAddCustomTemplate }: P
       if (result.detectedSlots && result.detectedSlots.length > 0) {
         setCustomSlots(result.detectedSlots)
         setDetectedSlotCount(result.detectedSlots.length)
+        // Auto-select UI preset based on detected count
+        if (result.detectedSlots.length === 2) setPreset('2-vert')
+        else if (result.detectedSlots.length === 3) setPreset('3-vert')
+        else if (result.detectedSlots.length === 4) setPreset('4-vert')
+        else if (result.detectedSlots.length === 6) setPreset('6-grid')
       }
     } finally {
       setIsProcessingChroma(false)
@@ -338,13 +493,15 @@ export default function CreatorModal({ isOpen, onClose, onAddCustomTemplate }: P
   if (!isOpen) return null
 
   const activeSlots = customSlots.length > 0 ? customSlots : (
-    preset === '3-vert' ? PRESET_3_VERTICAL : preset === '6-grid' ? PRESET_6_GRID : PRESET_4_VERTICAL
+    preset === '2-vert' ? PRESET_2_VERTICAL : preset === '3-vert' ? PRESET_3_VERTICAL : preset === '6-grid' ? PRESET_6_GRID : PRESET_4_VERTICAL
   )
 
   const previewConfig: TemplateConfig = {
-    id: 'custom-' + Date.now(),
+    id: customIdRef.current,
     name: name || 'Custom Strip Desain',
-    description: description || 'Template strip kustom buatan kreator komunitas',
+    description: creatorName.trim()
+      ? (creatorName.trim().startsWith('@') ? `Oleh ${creatorName.trim()}` : `Karya ${creatorName.trim()}`)
+      : 'Karya Kreator Komunitas',
     photoCount: activeSlots.length,
     stripWidth: 600,
     stripHeight: 1800,
@@ -354,18 +511,19 @@ export default function CreatorModal({ isOpen, onClose, onAddCustomTemplate }: P
     frameImageUrl: processedFrameUrl || undefined,
     frameMode: 'overlay',
     slots: activeSlots,
-    decorations: [
+    decorations: showText ? [
       { type: 'text', x: 300, y: 1680, text: (name || 'KUROBOOTH STRIP').toUpperCase(), fontSize: 16, fontFamily: 'Playfair Display, serif', color: accentColor, opacity: 0.95 },
       { type: 'text', x: 300, y: 1715, text: creatorName ? `BY ${creatorName.toUpperCase()}` : 'COMMUNITY EDITION', fontSize: 10, fontFamily: 'monospace', color: '#6B8574', opacity: 0.8 },
-    ],
+    ] : [],
     tags: tags.split(',').map(t => t.trim()).filter(Boolean),
     printSize: '2x6',
   }
 
-  function handlePresetChange(p: '4-vert' | '3-vert' | '6-grid') {
+  function handlePresetChange(p: '2-vert' | '3-vert' | '4-vert' | '6-grid') {
     setPreset(p)
-    if (p === '4-vert') setCustomSlots(PRESET_4_VERTICAL)
+    if (p === '2-vert') setCustomSlots(PRESET_2_VERTICAL)
     if (p === '3-vert') setCustomSlots(PRESET_3_VERTICAL)
+    if (p === '4-vert') setCustomSlots(PRESET_4_VERTICAL)
     if (p === '6-grid') setCustomSlots(PRESET_6_GRID)
     setDetectedSlotCount(0)
   }
@@ -378,7 +536,50 @@ export default function CreatorModal({ isOpen, onClose, onAddCustomTemplate }: P
       if (event.target?.result) {
         const base64 = event.target.result as string
         setRawImageSrc(base64)
-        reprocessChroma(base64, chromaColor, chromaTolerance, chromaSmoothness, chromaEnabled, slotPadding)
+        setProcessedFrameUrl('')
+        setAutoTransparent(false)
+        setShowText(false) // Auto-hide default text when frame is uploaded
+
+        // Auto-detect apakah gambar SUDAH punya transparansi (e.g. PNG with transparent slots)
+        const img = new Image()
+        img.onload = () => {
+          const c = document.createElement('canvas')
+          c.width = img.naturalWidth
+          c.height = img.naturalHeight
+          const cx = c.getContext('2d')
+          if (!cx) return
+          cx.drawImage(img, 0, 0)
+          const { data } = cx.getImageData(0, 0, c.width, c.height)
+          let transparentCount = 0
+          for (let i = 3; i < data.length; i += 4) {
+            if (data[i] < 200) transparentCount++
+          }
+          const transparentRatio = transparentCount / (c.width * c.height)
+          if (transparentRatio > 0.05) {
+            // Gambar sudah punya transparansi yang cukup — nonaktifkan chroma key
+            setChromaEnabled(false)
+            setAutoTransparent(true)
+            setProcessedFrameUrl(base64) // pakai gambar asli langsung
+
+            // TETAP LAKUKAN DETEKSI SLOT walaupun tidak pakai chroma key
+            const imgData = cx.getImageData(0, 0, c.width, c.height)
+            const detected = detectTransparentSlots(imgData, slotPadding)
+            if (detected && detected.length > 0) {
+              setCustomSlots(detected)
+              setDetectedSlotCount(detected.length)
+              if (detected.length === 2) setPreset('2-vert')
+              else if (detected.length === 3) setPreset('3-vert')
+              else if (detected.length === 4) setPreset('4-vert')
+              else if (detected.length === 6) setPreset('6-grid')
+            }
+          } else {
+            // Gambar solid — aktifkan chroma key untuk menghapus kotak warna
+            setChromaEnabled(true)
+            setAutoTransparent(false)
+            reprocessChroma(base64, chromaColor, chromaTolerance, chromaSmoothness, true, slotPadding)
+          }
+        }
+        img.src = base64
       }
     }
     reader.readAsDataURL(file)
@@ -387,7 +588,7 @@ export default function CreatorModal({ isOpen, onClose, onAddCustomTemplate }: P
   async function handleEyeDropper() {
     if (typeof window !== 'undefined' && 'EyeDropper' in window) {
       try {
-        const eyeDropper = new (window as any).EyeDropper()
+        const eyeDropper = new (window as { EyeDropper: new() => { open: () => Promise<{ sRGBHex: string }> } }).EyeDropper()
         const result = await eyeDropper.open()
         if (result?.sRGBHex) {
           const color = result.sRGBHex.toUpperCase()
@@ -421,18 +622,10 @@ export default function CreatorModal({ isOpen, onClose, onAddCustomTemplate }: P
     reprocessChroma(rawImageSrc, hex, chromaTolerance, chromaSmoothness, true, slotPadding)
   }
 
-  // Direct photo shoot with this custom template
-  function handleStartShooting() {
-    if (!name.trim()) {
-      setErrorMsg('Silakan beri nama template terlebih dahulu.')
-      return
-    }
-    onAddCustomTemplate?.(previewConfig)
-    try {
-      sessionStorage.setItem('kurobooth_template_' + previewConfig.id, JSON.stringify(previewConfig))
-    } catch {}
+  function handleClose() {
+    setSubmittedMessage(null)
+    setErrorMsg(null)
     onClose()
-    router.push(`/booth/${previewConfig.id}`)
   }
 
   // Submit to community (requires admin approval)
@@ -447,14 +640,29 @@ export default function CreatorModal({ isOpen, onClose, onAddCustomTemplate }: P
     setErrorMsg(null)
 
     try {
-      let finalFrameUrl = processedFrameUrl || rawImageSrc
+      // Pastikan chroma key sudah diapply dengan setting terkini sebelum submit
+      // (edge case: user upload gambar tapi belum pernah klik/ubah setting chroma)
+      let baseFrameUrl = processedFrameUrl
+      if (rawImageSrc && chromaEnabled && !processedFrameUrl) {
+        try {
+          const result = await applyChromaKey(rawImageSrc, chromaColor, chromaTolerance, chromaSmoothness, slotPadding)
+          baseFrameUrl = result.dataUrl
+          setProcessedFrameUrl(result.dataUrl)
+        } catch {
+          baseFrameUrl = rawImageSrc
+        }
+      }
+
+      let finalFrameUrl = baseFrameUrl || rawImageSrc
       if (finalFrameUrl && finalFrameUrl.startsWith('data:')) {
         try {
-          const { dataURLToBlob, generateShareCode } = await import('@/lib/utils')
-          const blob = dataURLToBlob(finalFrameUrl)
+          const { generateShareCode } = await import('@/lib/utils')
+          // Convert frame ke WebP untuk loading gallery yang lebih cepat
+          const webpDataUrl = await convertToWebP(finalFrameUrl, 0.92)
           const frameCode = 'frame-user-' + generateShareCode()
+          const webpBlob = dataUrlToWebPBlob(webpDataUrl)
           const formData = new FormData()
-          formData.append('file', blob, frameCode + '.png')
+          formData.append('file', webpBlob, frameCode + '.webp')
           formData.append('shareCode', frameCode)
           const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData })
           if (uploadRes.ok) {
@@ -466,10 +674,15 @@ export default function CreatorModal({ isOpen, onClose, onAddCustomTemplate }: P
         }
       }
 
+      const creator = creatorName.trim()
+      const formattedDesc = creator
+        ? (creator.startsWith('@') ? `Oleh ${creator}` : `Karya ${creator}`)
+        : 'Karya Kreator Komunitas'
+
       const payload = {
         name,
-        creatorName: creatorName || 'Anonim',
-        description,
+        creatorName: creator || 'Anonim',
+        description: formattedDesc,
         photoCount: activeSlots.length,
         stripWidth: 600,
         stripHeight: 1800,
@@ -492,6 +705,12 @@ export default function CreatorModal({ isOpen, onClose, onAddCustomTemplate }: P
       const data = await res.json()
       if (res.ok) {
         setSubmittedMessage(data.message || 'Template berhasil disumbangkan! Menunggu persetujuan kurasi admin.')
+        if (data.template && onAddCustomTemplate) {
+          onAddCustomTemplate(data.template)
+        }
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('kurobooth:templates-updated'))
+        }
       } else {
         setErrorMsg(data.error || 'Gagal mengirim template.')
       }
@@ -503,18 +722,18 @@ export default function CreatorModal({ isOpen, onClose, onAddCustomTemplate }: P
   }
 
   return (
-    <div className={styles.modalOverlay} onClick={onClose}>
+    <div className={styles.modalOverlay} onClick={handleClose}>
       <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
-        <button className={styles.closeBtn} onClick={onClose} aria-label="Tutup modal">
+        <button className={styles.closeBtn} onClick={handleClose} aria-label="Tutup modal">
           <CloseIcon size={18} />
         </button>
 
         <div className={styles.modalHeader}>
           <Mascot pose="artist" size="sm" animated={false} />
           <div>
-            <h2 className={styles.headerTitle}>Sumbang &amp; Buat Template</h2>
+            <h2 className={styles.headerTitle}>Sumbang Template Komunitas</h2>
             <p className={styles.headerSubtitle}>
-              Kreasikan template photobooth Canva dengan Chroma Key penghapus warna otomatis dan deteksi lubang foto presisi.
+              Kreasikan desain template photobooth Canva buatanmu lalu sumbangkan ke KuroBooth agar dapat ditinjau admin dan dibagikan ke publik.
             </p>
           </div>
         </div>
@@ -529,12 +748,9 @@ export default function CreatorModal({ isOpen, onClose, onAddCustomTemplate }: P
             <p style={{ color: 'var(--text-secondary)', maxWidth: '420px', fontSize: '0.9375rem', lineHeight: 1.6 }}>
               {submittedMessage} Admin akan meninjau dan menerbitkan karyamu agar bisa dinikmati oleh seluruh pengguna KuroBooth.
             </p>
-            <div style={{ display: 'flex', gap: '12px', marginTop: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
-              <button className="btn btn-primary" onClick={onClose}>
+            <div style={{ display: 'flex', gap: '12px', marginTop: '8px', justifyContent: 'center' }}>
+              <button className="btn btn-primary" onClick={handleClose}>
                 <span>Kembali ke Beranda</span>
-              </button>
-              <button className="btn btn-secondary" onClick={handleStartShooting}>
-                <span>Gunakan untuk Foto Sekarang</span>
               </button>
             </div>
           </div>
@@ -570,10 +786,10 @@ export default function CreatorModal({ isOpen, onClose, onAddCustomTemplate }: P
                 <div className={styles.presetGrid}>
                   <button
                     type="button"
-                    className={`${styles.presetBtn} ${preset === '4-vert' ? styles.presetBtnActive : ''}`}
-                    onClick={() => handlePresetChange('4-vert')}
+                    className={`${styles.presetBtn} ${preset === '2-vert' ? styles.presetBtnActive : ''}`}
+                    onClick={() => handlePresetChange('2-vert')}
                   >
-                    4 Foto Vertikal
+                    2 Foto Vertikal
                   </button>
                   <button
                     type="button"
@@ -584,12 +800,34 @@ export default function CreatorModal({ isOpen, onClose, onAddCustomTemplate }: P
                   </button>
                   <button
                     type="button"
+                    className={`${styles.presetBtn} ${preset === '4-vert' ? styles.presetBtnActive : ''}`}
+                    onClick={() => handlePresetChange('4-vert')}
+                  >
+                    4 Foto Vertikal
+                  </button>
+                  <button
+                    type="button"
                     className={`${styles.presetBtn} ${preset === '6-grid' ? styles.presetBtnActive : ''}`}
                     onClick={() => handlePresetChange('6-grid')}
                   >
                     6 Foto Grid
                   </button>
                 </div>
+              </div>
+
+              <div className={styles.fieldGroup} style={{ marginTop: 8 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                  <input
+                    type="checkbox"
+                    checked={showText}
+                    onChange={(e) => setShowText(e.target.checked)}
+                    style={{ width: 16, height: 16, accentColor: 'var(--accent-1)' }}
+                  />
+                  Tampilkan Teks Watermark (Nama Template)
+                </label>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4, marginLeft: 24 }}>
+                  Matikan ini jika kamu sudah mendesain teks sendiri di dalam frame gambarmu.
+                </p>
               </div>
 
               <div className={styles.fieldGroup}>
@@ -608,16 +846,42 @@ export default function CreatorModal({ isOpen, onClose, onAddCustomTemplate }: P
               {rawImageSrc && (
                 <div className={styles.chromaBox}>
                   <div className={styles.chromaHeader}>
-                    <span className={styles.chromaTitle}>Hapus Warna Kotak Foto (Chroma Key Transparan)</span>
+                    <span className={styles.chromaTitle}>Hapus Warna Kotak Foto (Chroma Key)</span>
                     <button
                       type="button"
                       className={styles.eyedropperBtn}
                       onClick={handleEyeDropper}
                     >
                       <EyedropperIcon size={14} />
-                      <span>Pipet Warna (EyeDropper)</span>
+                      <span>Pipet Warna</span>
                     </button>
                   </div>
+
+                  {/* Info badge: transparansi auto-terdeteksi */}
+                  {autoTransparent && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 10, background: '#E8F5E9', border: '1px solid #A5D6A7', marginBottom: 10 }}>
+                      <span style={{ fontSize: 16 }}>✅</span>
+                      <span style={{ fontSize: '0.78rem', color: '#2E7D32', fontWeight: 600 }}>
+                        Gambar sudah punya area transparan — Chroma Key dinonaktifkan otomatis.
+                        Aktifkan manual jika kotak foto masih berwarna.
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Toggle chroma key on/off */}
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 10, fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                    <input
+                      type="checkbox"
+                      checked={chromaEnabled}
+                      onChange={(ev) => {
+                        const enabled = ev.target.checked
+                        setChromaEnabled(enabled)
+                        reprocessChroma(rawImageSrc, chromaColor, chromaTolerance, chromaSmoothness, enabled, slotPadding)
+                      }}
+                      style={{ width: 16, height: 16, accentColor: 'var(--accent-1)' }}
+                    />
+                    Aktifkan Chroma Key (Hapus warna kotak foto)
+                  </label>
 
                   <div className={styles.chromaColors}>
                     {[
@@ -733,23 +997,14 @@ export default function CreatorModal({ isOpen, onClose, onAddCustomTemplate }: P
                 </div>
               )}
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+              <div style={{ marginTop: '6px' }}>
                 <button
                   type="submit"
                   className="btn btn-primary btn-lg w-full"
                   disabled={isSubmitting || isProcessingChroma}
                 >
                   <SparklesIcon size={18} />
-                  <span>{isSubmitting ? 'Mengirim Template...' : 'Sumbang ke Publik (Review Admin)'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  className="btn btn-secondary w-full"
-                  onClick={handleStartShooting}
-                >
-                  <span>Gunakan Langsung Saja untuk Foto</span>
-                  <ArrowRightIcon size={15} />
+                  <span>{isSubmitting ? 'Mengirim Template...' : 'Sumbang ke Publik'}</span>
                 </button>
               </div>
             </form>

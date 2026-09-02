@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { TEMPLATES, TemplateConfig } from '@/lib/templates'
 import TemplatePreview from '@/components/TemplatePreview'
@@ -60,19 +60,24 @@ export default function HomePage() {
 
   // Reset page when category or search changes
   useEffect(() => {
-    setCurrentPage(1)
+    // Use startTransition-friendly functional form to avoid cascading re-renders
+    const timer = setTimeout(() => setCurrentPage(1), 0)
+    return () => clearTimeout(timer)
   }, [activeTag, searchQuery])
 
   // Load favorites from LocalStorage on mount
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('kurobooth_favorites')
-      if (saved) {
-        setFavorites(JSON.parse(saved))
+    const timer = setTimeout(() => {
+      try {
+        const saved = localStorage.getItem('kurobooth_favorites')
+        if (saved) {
+          setFavorites(JSON.parse(saved))
+        }
+      } catch {
+        // LocalStorage not accessible
       }
-    } catch {
-      // LocalStorage not accessible
-    }
+    }, 0)
+    return () => clearTimeout(timer)
   }, [])
 
   // Close category dropdown on click outside
@@ -92,25 +97,31 @@ export default function HomePage() {
   }, [isCategoryOpen])
 
   // Background fetch to sync DB / Custom templates without blocking the UI
-  useEffect(() => {
-    async function loadDbTemplates() {
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 2000)
-      try {
-        const res = await fetch('/api/templates', { signal: controller.signal })
-        clearTimeout(timeout)
-        if (res.ok) {
-          const data = await res.json()
-          if (data.templates && data.templates.length > 0) {
-            setTemplates(data.templates)
-          }
+  const loadDbTemplates = useCallback(async () => {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 3000)
+    try {
+      const res = await fetch('/api/templates', { signal: controller.signal })
+      clearTimeout(timeout)
+      if (res.ok) {
+        const data = await res.json()
+        if (data.templates && data.templates.length > 0) {
+          setTemplates(data.templates)
         }
-      } catch {
-        clearTimeout(timeout)
       }
+    } catch {
+      clearTimeout(timeout)
     }
-    loadDbTemplates()
   }, [])
+
+  // Auto-fetch on mount and auto-refresh whenever templates are added, approved, edited, or deleted
+  useEffect(() => {
+    loadDbTemplates()
+    window.addEventListener('kurobooth:templates-updated', loadDbTemplates)
+    return () => {
+      window.removeEventListener('kurobooth:templates-updated', loadDbTemplates)
+    }
+  }, [loadDbTemplates])
 
   function toggleFavorite(id: string, e?: React.MouseEvent) {
     e?.stopPropagation()
@@ -127,6 +138,7 @@ export default function HomePage() {
     if (customTemplate.isActive) {
       setTemplates(prev => [customTemplate, ...prev.filter(t => t.id !== customTemplate.id)])
     }
+    loadDbTemplates()
   }
 
   function handleSelect(template: TemplateConfig) {
@@ -240,7 +252,7 @@ export default function HomePage() {
                   onClick={() => setIsCreatorOpen(true)}
                 >
                   <WandIcon size={18} />
-                  <span>+ Sumbang / Buat Template</span>
+                  <span>+ Sumbang Template</span>
                 </button>
               </div>
             </div>
@@ -410,7 +422,7 @@ export default function HomePage() {
                 <Mascot pose="searching" size="md" />
                 <h3 className={styles.emptyTitle}>Template Tidak Ditemukan</h3>
                 <p className={styles.emptyDesc}>
-                  {`Tidak ada template yang cocok dengan "${searchQuery}". Coba kata kunci lain atau buat template kustom.`}
+                  {`Tidak ada template yang cocok dengan "${searchQuery}". Coba kata kunci lain atau sumbang template baru.`}
                 </p>
                 <div style={{ display: 'flex', gap: '10px' }}>
                   <button
@@ -427,7 +439,7 @@ export default function HomePage() {
                     onClick={() => setIsCreatorOpen(true)}
                   >
                     <WandIcon size={14} />
-                    <span>Buat Frame Kustom</span>
+                    <span>Sumbang Template</span>
                   </button>
                 </div>
               </div>
@@ -480,7 +492,9 @@ export default function HomePage() {
                           {template.photoCount} foto
                         </span>
                       </div>
-                      <p className={styles.templateDesc}>{template.description}</p>
+                      <p className={styles.templateDesc}>
+                        {template.description?.trim() || 'Karya Kreator Komunitas'}
+                      </p>
                       <div className={styles.templateTags}>
                         {template.tags?.slice(0, 3).map(tag => (
                           <span key={tag} className={styles.templateTag}>#{tag}</span>

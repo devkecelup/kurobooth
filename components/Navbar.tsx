@@ -4,14 +4,10 @@ import { useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import {
-  CameraIcon,
-  SearchIcon,
   HeartIcon,
   HeartFilledIcon,
   PaletteIcon,
   QrCodeIcon,
-  SparklesIcon,
-  CloseIcon,
   WandIcon,
   CodeIcon,
 } from '@/components/Icons'
@@ -27,9 +23,7 @@ interface Props {
 }
 
 export default function Navbar({
-  activeCategory = 'Semua',
   onSelectCategory,
-  favoriteCount = 0,
   onOpenCreator,
   onOpenLookup,
 }: Props) {
