@@ -39,15 +39,16 @@ export default function ResultPageInner({ params }: Props) {
 
   useEffect(() => {
     async function load() {
-      // 1. Check local session storage first (instant, 0 network latency, works offline)
+      // 1. Check local high-capacity storage (IndexedDB + sessionStorage) first (instant 0ms, offline-ready)
       try {
-        const localImg = sessionStorage.getItem('kurobooth_result_' + shareCode)
+        const { getLocalResult } = await import('@/lib/localStore')
+        const localImg = await getLocalResult(shareCode)
         if (localImg) {
           setImageUrl(localImg)
           setIsLoading(false)
         }
       } catch (e) {
-        console.warn('SessionStorage read error:', e)
+        console.warn('Local storage read error:', e)
       }
 
       // 2. Query API if not already loaded or to sync session metadata
@@ -98,9 +99,10 @@ export default function ResultPageInner({ params }: Props) {
     try {
       let blobUrl: string | null = null
 
-      // 1. Prioritas: ambil dari sessionStorage (instan, offline-capable)
+      // 1. Prioritas: ambil dari IndexedDB / sessionStorage (instan, offline-capable)
       try {
-        const localImg = sessionStorage.getItem('kurobooth_result_' + shareCode)
+        const { getLocalResult } = await import('@/lib/localStore')
+        const localImg = (await getLocalResult(shareCode)) || (imageUrl.startsWith('data:') ? imageUrl : null)
         if (localImg && localImg.startsWith('data:')) {
           const res = await fetch(localImg)
           const blob = await res.blob()
@@ -108,8 +110,7 @@ export default function ResultPageInner({ params }: Props) {
         }
       } catch { /* ignore */ }
 
-      // 2. Jika tidak ada di sessionStorage, pakai server-side proxy download
-      //    sehingga browser langsung download (bukan buka tab baru ke Supabase)
+      // 2. Jika tidak ada di local storage, pakai server-side proxy download
       if (!blobUrl && imageUrl) {
         const proxyUrl = `/api/download?url=${encodeURIComponent(imageUrl)}&name=${encodeURIComponent(fileName)}`
         const res = await fetch(proxyUrl)
@@ -131,7 +132,7 @@ export default function ResultPageInner({ params }: Props) {
         throw new Error('No blob available')
       }
     } catch {
-      // Last resort: direct href (mungkin buka di tab baru, tapi masih bisa disave)
+      // Last resort: direct href
       const a = document.createElement('a')
       a.href = imageUrl
       a.download = fileName
@@ -205,6 +206,16 @@ export default function ResultPageInner({ params }: Props) {
                       src={imageUrl}
                       alt="Hasil strip foto photobooth"
                       className={styles.stripImage}
+                      onError={async () => {
+                        // If remote URL fails to load (e.g. 404 or network issue), recover from IndexedDB
+                        try {
+                          const { getLocalResult } = await import('@/lib/localStore')
+                          const fallbackImg = await getLocalResult(shareCode)
+                          if (fallbackImg && fallbackImg !== imageUrl) {
+                            setImageUrl(fallbackImg)
+                          }
+                        } catch {}
+                      }}
                     />
                   ) : (
                     <div className={styles.stripPlaceholder}>Foto tidak ditemukan</div>

@@ -148,30 +148,44 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 2. Fallback: Catbox
+    // 2. Fallback: ImgBB
+    let imgbbUrl: string | null = null
+    if (!supabaseUrl && IMGBB_API_KEY) {
+      imgbbUrl = await uploadToImgBB(buffer, fileName)
+    }
+
+    // 3. Fallback: Catbox (permanent free hosting)
     let catboxUrl: string | null = null
-    if (!supabaseUrl) {
+    if (!supabaseUrl && !imgbbUrl) {
       catboxUrl = await uploadToCatbox(buffer, fileName, mimeType)
     }
 
-    // 3. Fallback: Local disk for development
+    // 4. Fallback: Local disk for development & DataURL for serverless
     const localUrl = `/uploads/results/${shareCode}.${ext}`
+    let isLocalSaved = false
     try {
       const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'results')
       await fs.mkdir(uploadDir, { recursive: true })
       const filePath = path.join(uploadDir, `${shareCode}.${ext}`)
       await fs.writeFile(filePath, buffer)
+      isLocalSaved = true
     } catch {
       // Ignored in serverless
     }
 
-    const finalUrl = supabaseUrl || catboxUrl || localUrl
+    const dataUrl = `data:${mimeType};base64,${buffer.toString('base64')}`
+    const isServerless = process.env.VERCEL || process.env.NODE_ENV === 'production'
+
+    // If on serverless and remote uploads failed, dataUrl guarantees zero 404 broken images
+    const finalUrl = supabaseUrl || imgbbUrl || catboxUrl || (isServerless && !isLocalSaved ? dataUrl : localUrl)
 
     return NextResponse.json({
       url: finalUrl,
       supabaseUrl,
+      imgbbUrl,
       catboxUrl,
-      localUrl,
+      localUrl: isLocalSaved ? localUrl : null,
+      dataUrl: (!supabaseUrl && !imgbbUrl && !catboxUrl) ? dataUrl : undefined,
     }, { status: 200 })
   } catch (err) {
     console.error('Upload POST error:', err)

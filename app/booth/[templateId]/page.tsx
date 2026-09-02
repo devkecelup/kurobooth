@@ -140,27 +140,28 @@ export default function BoothPage({ params }: Props) {
       const blob = dataURLToBlob(dataUrl)
       const shareCode = generateShareCode()
 
-      // Save locally in browser session storage as primary immediate source
+      // 1. Save locally in browser high-capacity IndexedDB as instant 0ms source
       try {
-        sessionStorage.setItem('kurobooth_result_' + shareCode, dataUrl)
+        const { saveLocalResult } = await import('@/lib/localStore')
+        await saveLocalResult(shareCode, dataUrl)
         sessionStorage.setItem('kurobooth_template_' + shareCode, JSON.stringify(template))
       } catch (e) {
-        console.warn('Could not save to sessionStorage:', e)
+        console.warn('Could not save to localStore:', e)
       }
 
       const formData = new FormData()
       formData.append('file', blob, shareCode + '.png')
       formData.append('shareCode', shareCode)
       
-      let imageUrl = `/uploads/results/${shareCode}.png`
+      let imageUrl = dataUrl // default to safe local dataUrl fallback
       try {
         const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData })
         if (uploadRes.ok) {
           const uploadData = await uploadRes.json()
-          imageUrl = uploadData.url
+          if (uploadData.url) imageUrl = uploadData.url
         }
       } catch (e) {
-        console.warn('Upload API call failed, using local URL:', e)
+        console.warn('Upload API call failed, using dataUrl:', e)
       }
 
       try {
