@@ -53,6 +53,7 @@ export default function HomePage() {
   const [isCategoryOpen, setIsCategoryOpen] = useState(false)
   const [hovered, setHovered] = useState<string | null>(null)
   const [templates, setTemplates] = useState<TemplateConfig[]>(TEMPLATES)
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(true)
   const [favorites, setFavorites] = useState<string[]>([])
   const [isCreatorOpen, setIsCreatorOpen] = useState(false)
   const [isLookupOpen, setIsLookupOpen] = useState(false)
@@ -96,10 +97,11 @@ export default function HomePage() {
     }
   }, [isCategoryOpen])
 
-  // Background fetch to sync DB / Custom templates without blocking the UI
-  const loadDbTemplates = useCallback(async () => {
+  // Background fetch to sync DB / Custom templates with safe cold-start timeout and auto-retry
+  const loadDbTemplates = useCallback(async (isRetry = false) => {
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 3000)
+    // 7 seconds timeout: safe for Supabase cold-start without keeping user waiting too long
+    const timeout = setTimeout(() => controller.abort(), 7000)
     try {
       const res = await fetch('/api/templates', { signal: controller.signal })
       clearTimeout(timeout)
@@ -108,18 +110,27 @@ export default function HomePage() {
         if (data.templates && data.templates.length > 0) {
           setTemplates(data.templates)
         }
+      } else if (!isRetry) {
+        setTimeout(() => loadDbTemplates(true), 1000)
+        return
       }
     } catch {
       clearTimeout(timeout)
+      if (!isRetry) {
+        setTimeout(() => loadDbTemplates(true), 1000)
+        return
+      }
+    } finally {
+      setIsLoadingTemplates(false)
     }
   }, [])
 
   // Auto-fetch on mount and auto-refresh whenever templates are added, approved, edited, or deleted
   useEffect(() => {
     loadDbTemplates()
-    window.addEventListener('kurobooth:templates-updated', loadDbTemplates)
+    window.addEventListener('kurobooth:templates-updated', () => loadDbTemplates(false))
     return () => {
-      window.removeEventListener('kurobooth:templates-updated', loadDbTemplates)
+      window.removeEventListener('kurobooth:templates-updated', () => loadDbTemplates(false))
     }
   }, [loadDbTemplates])
 
@@ -417,7 +428,21 @@ export default function HomePage() {
 
           {/* Template Grid */}
           <div className={styles.templateGrid}>
-            {filtered.length === 0 ? (
+            {isLoadingTemplates && templates.length <= TEMPLATES.length ? (
+              <div className={styles.mascotLoadingState}>
+                <Mascot
+                  pose="searching"
+                  size="md"
+                  animated
+                  showSpeech
+                  speechText="Menyiapkan template photobooth keren buat kamu... ✨"
+                />
+                <div className={styles.loadingBarWrap}>
+                  <div className={styles.loadingBarInner} />
+                </div>
+                <p className={styles.loadingSubtext}>Menghubungkan ke studio template...</p>
+              </div>
+            ) : filtered.length === 0 ? (
               <div className={styles.emptyState}>
                 <Mascot pose="searching" size="md" />
                 <h3 className={styles.emptyTitle}>Template Tidak Ditemukan</h3>

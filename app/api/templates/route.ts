@@ -90,14 +90,28 @@ function mapTbTemplate(tbData: Record<string, unknown>) {
   }
 }
 
+// Server-side in-memory cache for fast template delivery (< 5ms response)
+let serverTemplatesCache: { data: unknown; timestamp: number } | null = null
+const SERVER_CACHE_TTL_MS = 60 * 1000 // 60 seconds TTL
+
+export function invalidateServerTemplatesCache() {
+  serverTemplatesCache = null
+}
+
 /**
  * GET /api/templates — list all active templates
  * GET /api/templates?id=xxx — get single template by id
  */
 export async function GET(request: NextRequest) {
   const id = request.nextUrl.searchParams.get('id')
+  const showAll = request.nextUrl.searchParams.get('all') === 'true' && isAdmin(request)
   const headers = {
     'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=86400',
+  }
+
+  // Fast-path: return from server memory cache if asking for public template list
+  if (!id && !showAll && serverTemplatesCache && (Date.now() - serverTemplatesCache.timestamp < SERVER_CACHE_TTL_MS)) {
+    return NextResponse.json(serverTemplatesCache.data, { headers })
   }
 
   // If TB API Key is present, try to fetch from TemplatesBooth API with quick 1.5s timeout
@@ -142,7 +156,6 @@ export async function GET(request: NextRequest) {
   if (isSupabaseConfigured()) {
     try {
       const { supabase } = await import('@/lib/supabase')
-      const showAll = request.nextUrl.searchParams.get('all') === 'true' && isAdmin(request)
 
       if (id) {
         let query = supabase.from('templates').select('*').eq('id', id)
@@ -162,7 +175,11 @@ export async function GET(request: NextRequest) {
         if (!error && data) {
           const dbIds = new Set(data.map((t: Record<string, unknown>) => t.id))
           const hardcoded = TEMPLATES.filter(t => !dbIds.has(t.id))
-          return NextResponse.json({ templates: [...data.map(normalizeFromDb), ...hardcoded] }, { headers })
+          const responsePayload = { templates: [...data.map(normalizeFromDb), ...hardcoded] }
+          if (!showAll) {
+            serverTemplatesCache = { data: responsePayload, timestamp: Date.now() }
+          }
+          return NextResponse.json(responsePayload, { headers })
         }
       }
     } catch (err) {
@@ -280,6 +297,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    serverTemplatesCache = null
+
     // Return in-memory created template
     return NextResponse.json({
       template: newTemplate,
@@ -306,6 +325,8 @@ export async function PATCH(request: NextRequest) {
   if (!id) {
     return NextResponse.json({ error: 'Parameter id wajib diisi' }, { status: 400 })
   }
+
+  serverTemplatesCache = null
 
   if (isSupabaseConfigured()) {
     try {
@@ -341,6 +362,8 @@ export async function DELETE(request: NextRequest) {
   if (!id) {
     return NextResponse.json({ error: 'Parameter id wajib diisi' }, { status: 400 })
   }
+
+  serverTemplatesCache = null
 
   if (isSupabaseConfigured()) {
     try {

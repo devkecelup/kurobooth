@@ -6,6 +6,9 @@ import { roundRect, drawImageAdjusted, PhotoAdjustment } from '@/lib/utils'
 import { RefreshIcon } from '@/components/Icons'
 import styles from './TemplatePreview.module.css'
 
+// In-memory cache for downloaded frame images to make canvas render instant (0ms delay)
+const frameImageCache = new Map<string, HTMLImageElement>()
+
 interface Props {
   template: TemplateConfig
   isHovered?: boolean
@@ -163,14 +166,21 @@ export default function TemplatePreview({
 
     // If background frame image exists, load it first
     if (template.frameImageUrl && template.frameMode === 'background') {
-      const bgImg = new Image()
-      bgImg.crossOrigin = 'anonymous'
-      bgImg.src = template.frameImageUrl
-      bgImg.onload = () => {
-        ctx.drawImage(bgImg, 0, 0, W, H)
+      const cached = frameImageCache.get(template.frameImageUrl)
+      if (cached && cached.complete && cached.naturalWidth > 0) {
+        ctx.drawImage(cached, 0, 0, W, H)
         continueRender()
+      } else {
+        const bgImg = new Image()
+        bgImg.crossOrigin = 'anonymous'
+        bgImg.src = template.frameImageUrl
+        bgImg.onload = () => {
+          frameImageCache.set(template.frameImageUrl!, bgImg)
+          ctx.drawImage(bgImg, 0, 0, W, H)
+          continueRender()
+        }
+        bgImg.onerror = () => continueRender()
       }
-      bgImg.onerror = () => continueRender()
     } else {
       continueRender()
     }
@@ -402,14 +412,21 @@ function drawOverlayAndDecorations(
 ) {
   // Draw Canva Overlay Frame on top of photos
   if (template.frameImageUrl && template.frameMode !== 'background') {
-    const frameImg = new Image()
-    frameImg.crossOrigin = 'anonymous'
-    frameImg.src = template.frameImageUrl
-    frameImg.onload = () => {
-      ctx.drawImage(frameImg, 0, 0, W, H)
+    const cached = frameImageCache.get(template.frameImageUrl)
+    if (cached && cached.complete && cached.naturalWidth > 0) {
+      ctx.drawImage(cached, 0, 0, W, H)
       renderDecorations(ctx, template)
+    } else {
+      const frameImg = new Image()
+      frameImg.crossOrigin = 'anonymous'
+      frameImg.src = template.frameImageUrl
+      frameImg.onload = () => {
+        frameImageCache.set(template.frameImageUrl!, frameImg)
+        ctx.drawImage(frameImg, 0, 0, W, H)
+        renderDecorations(ctx, template)
+      }
+      frameImg.onerror = () => renderDecorations(ctx, template)
     }
-    frameImg.onerror = () => renderDecorations(ctx, template)
   } else {
     renderDecorations(ctx, template)
   }

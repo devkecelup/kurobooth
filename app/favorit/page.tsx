@@ -29,6 +29,7 @@ export default function FavoritPage() {
   const router = useRouter()
   const [favorites, setFavorites] = useState<string[]>([])
   const [templates, setTemplates] = useState<TemplateConfig[]>(TEMPLATES)
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(true)
   const [activeTag, setActiveTag] = useState('Semua')
   const [searchQuery, setSearchQuery] = useState('')
   const [isCreatorOpen, setIsCreatorOpen] = useState(false)
@@ -50,10 +51,11 @@ export default function FavoritPage() {
     return () => clearTimeout(timer)
   }, [])
 
-  // Sync DB / custom templates
-  const loadDbTemplates = useCallback(async () => {
+  // Sync DB / custom templates with safe cold-start timeout and auto-retry
+  const loadDbTemplates = useCallback(async (isRetry = false) => {
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 3000)
+    // 7 seconds timeout for Supabase cold-start
+    const timeout = setTimeout(() => controller.abort(), 7000)
     try {
       const res = await fetch('/api/templates', { signal: controller.signal })
       clearTimeout(timeout)
@@ -62,17 +64,26 @@ export default function FavoritPage() {
         if (data.templates && data.templates.length > 0) {
           setTemplates(data.templates)
         }
+      } else if (!isRetry) {
+        setTimeout(() => loadDbTemplates(true), 1000)
+        return
       }
     } catch {
       clearTimeout(timeout)
+      if (!isRetry) {
+        setTimeout(() => loadDbTemplates(true), 1000)
+        return
+      }
+    } finally {
+      setIsLoadingTemplates(false)
     }
   }, [])
 
   useEffect(() => {
     loadDbTemplates()
-    window.addEventListener('kurobooth:templates-updated', loadDbTemplates)
+    window.addEventListener('kurobooth:templates-updated', () => loadDbTemplates(false))
     return () => {
-      window.removeEventListener('kurobooth:templates-updated', loadDbTemplates)
+      window.removeEventListener('kurobooth:templates-updated', () => loadDbTemplates(false))
     }
   }, [loadDbTemplates])
 
@@ -222,7 +233,21 @@ export default function FavoritPage() {
           )}
 
           {/* Favorites Grid */}
-          {filteredFavorites.length > 0 ? (
+          {isLoadingTemplates && favorites.length > 0 && favoriteTemplates.length === 0 ? (
+            <div className={styles.mascotLoadingState}>
+              <Mascot
+                pose="searching"
+                size="md"
+                animated
+                showSpeech
+                speechText="Memuat koleksi template favoritmu... ❤️"
+              />
+              <div className={styles.loadingBarWrap}>
+                <div className={styles.loadingBarInner} />
+              </div>
+              <p className={styles.loadingSubtext}>Menghubungkan ke studio template...</p>
+            </div>
+          ) : filteredFavorites.length > 0 ? (
             <div className={styles.grid}>
               {filteredFavorites.map(t => (
                 <div key={t.id} className={styles.templateCard}>

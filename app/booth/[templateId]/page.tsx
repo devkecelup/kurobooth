@@ -7,6 +7,7 @@ import { TemplateConfig } from '@/lib/templates'
 import { generateShareCode, dataURLToBlob, PhotoAdjustment } from '@/lib/utils'
 import CameraCapture from '@/components/CameraCapture'
 import TemplatePreview from '@/components/TemplatePreview'
+import Mascot from '@/components/Mascot'
 import FloatingMascotAssistant from '@/components/FloatingMascotAssistant'
 import {
   ArrowLeftIcon,
@@ -39,9 +40,9 @@ export default function BoothPage({ params }: Props) {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    async function loadTemplate() {
+    async function loadTemplate(isRetry = false) {
       const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 4000)
+      const timeout = setTimeout(() => controller.abort(), 7000)
       try {
         const res = await fetch('/api/templates?id=' + encodeURIComponent(templateId), { signal: controller.signal })
         clearTimeout(timeout)
@@ -51,12 +52,18 @@ export default function BoothPage({ params }: Props) {
           setTemplate(t)
           setPhotos(Array(t.photoCount).fill(null))
           setAdjustments(Array(t.photoCount).fill(null).map(() => ({ zoom: 1, offsetX: 0, offsetY: 0 })))
+        } else if (!isRetry) {
+          setTimeout(() => loadTemplate(true), 1000)
         } else {
           setTemplate(null)
         }
       } catch {
         clearTimeout(timeout)
-        setTemplate(null)
+        if (!isRetry) {
+          setTimeout(() => loadTemplate(true), 1000)
+        } else {
+          setTemplate(null)
+        }
       }
     }
     loadTemplate()
@@ -72,8 +79,9 @@ export default function BoothPage({ params }: Props) {
   if (template === undefined) {
     return (
       <div className={styles.loadingState}>
-        <div className={styles.loadingSpinner} />
-        <p>Memuat konfigurasi template...</p>
+        <Mascot pose="camera" size="md" animated showSpeech speechText="Menyiapkan photobooth kamu... 📸" />
+        <div className={styles.loadingSpinner} style={{ marginTop: '14px' }} />
+        <p style={{ marginTop: '6px' }}>Memuat konfigurasi template...</p>
       </div>
     )
   }
