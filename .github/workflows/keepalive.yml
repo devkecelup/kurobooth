@@ -12,15 +12,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping /api/keepalive
+        env:
+          # Fallback to the production URL if the secret is not configured
+          APP_URL: ${{ secrets.APP_URL || 'https://kurobooth.vercel.app' }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          echo "Pinging Supabase keep-alive endpoint..."
-          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" "${{ secrets.APP_URL }}/api/keepalive")
-          HTTP_STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS:" | cut -d: -f2)
-          BODY=$(echo "$RESPONSE" | grep -v "HTTP_STATUS:")
-          echo "Response: $BODY"
+          set -euo pipefail
+
+          BASE_URL="${APP_URL%/}"
+          URL="$BASE_URL/api/keepalive"
+          if [ -n "${CRON_SECRET:-}" ]; then
+            URL="$URL?secret=$CRON_SECRET"
+          fi
+
+          echo "Pinging $BASE_URL/api/keepalive ..."
+
+          if ! HTTP_STATUS=$(curl -sS -o /tmp/keepalive.json -w "%{http_code}" \
+              --retry 3 --retry-delay 5 --max-time 30 "$URL"); then
+            echo "❌ curl failed to reach $URL"
+            exit 1
+          fi
+
+          echo "Response: $(cat /tmp/keepalive.json)"
           echo "HTTP Status: $HTTP_STATUS"
+
           if [ "$HTTP_STATUS" != "200" ]; then
             echo "❌ Keep-alive ping failed with status $HTTP_STATUS"
             exit 1
           fi
+
           echo "✅ Supabase is alive!"
