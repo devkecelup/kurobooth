@@ -6,6 +6,11 @@ on:
     - cron: '0 6 * * *'
   workflow_dispatch: # Allow manual trigger from GitHub UI
 
+# Do not let old runs pile up if GitHub's hosted runner queue is stuck.
+concurrency:
+  group: supabase-keepalive
+  cancel-in-progress: true
+
 jobs:
   ping:
     name: Ping Supabase
